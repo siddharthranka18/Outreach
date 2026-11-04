@@ -1,0 +1,116 @@
+# Candidate Profile Configuration for Startup Job Outreach Agent
+# Populated with verified candidate data; configurable and extensible.
+
+candidate:
+  name: "Siddharth Ranka"
+  current_education:
+    degree: "B.Tech in Computer Science and Engineering"
+    institution: "BML Munjal University"
+    location: "Gurgaon, Haryana, India"
+    current_year: "3rd Year"
+    expected_graduation: "Jun 2028"
+    cgpa: "7.46/10"
+
+  skills:
+    languages:
+      - "Python"
+      - "JavaScript"
+      - "Java"
+      - "C++"
+    frameworks:
+      - "FastAPI"
+      - "Node.js"
+      - "Express.js"
+      - "React.js"
+      - "React Native"
+    databases:
+      - "MySQL"
+      - "MongoDB"
+      - "Redis"
+      - "Firebase"
+      - "Qdrant"
+      - "SQLite"
+    ai_ml:
+      - "LangChain"
+      - "LangGraph"
+      - "Retrieval-Augmented Generation (RAG)"
+      - "Sentence Transformers"
+      - "Vector Databases"
+      - "Groq LLaMA"
+      - "LLMs"
+    tools:
+      - "Docker"
+      - "Git"
+      - "GitHub"
+      - "Postman"
+      - "Expo"
+      - "EAS Build"
+      - "BullMQ"
+      - "Socket.IO"
+    concepts:
+      - "REST APIs"
+      - "MVC"
+      - "System Design"
+      - "Caching"
+      - "Queue Architecture"
+      - "Geospatial Indexing"
+      - "Optimistic Locking"
+
+  experiences:
+    - role: "Software Development Intern"
+      company: "Lipi Data Systems"
+      duration: "Jun 2026 - Jul 2026"
+      highlights:
+        - "Developed Workforce Management mobile application using React Native, Node.js, Express.js, and MySQL"
+        - "Designed and integrated 12 RESTful endpoints across 5 route modules following MVC architecture"
+        - "Implemented background GPS tracking with Expo Location APIs and OpenStreetMap route telemetry"
+
+  projects:
+    - title: "SehatSaathi"
+      description: "Voice-enabled AI medical triage assistant using FastAPI, React, Groq LLaMA 3.3, and Hybrid RAG (Qdrant, BM25, RRF, CrossEncoder reranking)."
+      technologies: ["FastAPI", "React", "Groq LLaMA", "RAG", "Qdrant", "Docker", "Python"]
+    - title: "Smart Airport Ride Pooling Backend"
+      description: "Ride pooling backend using Node.js, Express.js, MongoDB 2dsphere geospatial indexing, sub-300ms matching, optimistic locking."
+      technologies: ["Node.js", "Express.js", "MongoDB", "Geospatial Indexing", "REST APIs", "JavaScript"]
+    - title: "Notification Engine"
+      description: "Asynchronous notification engine using BullMQ, Redis, MongoDB, queue-worker architecture, and Socket.IO real-time tracking."
+      technologies: ["BullMQ", "Redis", "MongoDB", "Queue Architecture", "Socket.IO", "Node.js"]
+    - title: "AI Shopping Assistant"
+      description: "Conversational shopping assistant using Python, LangChain, Groq LLMs, Streamlit, SQLite, and vision tool-calling."
+      technologies: ["Python", "LangChain", "Groq LLMs", "Streamlit", "SQLite"]
+
+  preferences:
+    target_roles:
+      - "Software Development Intern"
+      - "Backend Intern"
+      - "AI/ML Intern"
+      - "Full Stack Intern"
+      - "Data Engineering Intern"
+      - "General Software Engineering"
+    work_arrangements:
+      - "remote"
+      - "hybrid"
+      - "on-site"
+    preferred_locations:
+      - "remote"
+      - "india"
+      - "gurgaon"
+      - "delhi"
+      - "ncr"
+      - "bengaluru"
+      - "bangalore"
+      - "hyderabad"
+      - "united states"
+      - "canada"
+    exclude_seniority:
+      - "senior"
+      - "lead"
+      - "staff"
+      - "principal"
+      - "director"
+      - "head of"
+      - "vp"
+      - "10+ years"
+      - "7+ years"
+      - "5+ years"
+
