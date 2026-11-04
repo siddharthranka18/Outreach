@@ -1,29 +1,39 @@
-"""Base discovery interface for startup sources."""
+"""Base discovery interface and result container for startup sources."""
 
 from abc import ABC, abstractmethod
-from typing import List
+from dataclasses import dataclass, field
+from typing import List, Union
 from startup_agent.models.company import Company
+from startup_agent.models.job import Job
+
+
+@dataclass
+class DiscoveryResult:
+    """Standard container holding entities collected during a discovery execution."""
+
+    companies: List[Company] = field(default_factory=list)
+    jobs: List[Job] = field(default_factory=list)
 
 
 class BaseDiscoverySource(ABC):
-    """Abstract base class defining the contract for future source discovery adapters."""
+    """Abstract base class defining the contract for startup and job discovery adapters."""
 
     def __init__(self, name: str, enabled: bool = True) -> None:
-        """Initialize the discovery source.
+        """Initialize discovery adapter.
 
         Args:
-            name: Identifier for the source adapter.
-            enabled: Whether this source is active.
+            name: Unique identifier for the source adapter.
+            enabled: Whether this source is active for execution.
         """
         self.name = name
         self.enabled = enabled
 
     @abstractmethod
-    def discover(self) -> List[Company]:
-        """Execute discovery logic to find and return companies.
+    def discover(self) -> Union[DiscoveryResult, List[Company]]:
+        """Execute discovery logic to extract companies and/or jobs.
 
         Returns:
-            List[Company]: Discovered and normalized Company instances.
+            Union[DiscoveryResult, List[Company]]: Extracted entities.
 
         Raises:
             NotImplementedError: Must be implemented by concrete adapters.
@@ -33,4 +43,3 @@ class BaseDiscoverySource(ABC):
     def is_enabled(self) -> bool:
         """Check if the source adapter is enabled."""
         return self.enabled
-

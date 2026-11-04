@@ -10,10 +10,12 @@ from startup_agent.utils.normalizers import normalize_job_url, normalize_name
 class Job:
     """Represents an advertised job posting linked to a company."""
 
-    company_id: int
     job_title: str
     job_url: str
     source_name: str
+    company_id: Optional[int] = None
+    company_name: Optional[str] = None
+    company_website: Optional[str] = None
     id: Optional[int] = None
     description: Optional[str] = None
     location: Optional[str] = None
@@ -53,4 +55,3 @@ class Job:
     def normalized_job_url(self) -> str:
         """Return canonical tracking-stripped job URL."""
         return normalize_job_url(self.job_url)
-

@@ -10,13 +10,12 @@ sources:
   - name: "top_startups"
     display_name: "TopStartups.io"
     type: "curated_list"
-    url: "https://topstartups.io"
+    url: "https://topstartups.io/jobs/"
     enabled: true
     description: "Curated startup database filtered for early-stage and funded companies."
 
   - name: "company_career_sites"
-    display_name: "Direct Career Pages"
+    display_name: "Direct Career Pages & ATS"
     type: "direct_ats"
     enabled: true
     description: "Direct company career portals and public ATS endpoints (Greenhouse, Lever, Ashby)."
-

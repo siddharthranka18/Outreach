@@ -1,7 +1,7 @@
 """Repository layer for Company and Job persistence operations."""
 
 from datetime import datetime, timezone
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from startup_agent.database.models import CompanyModel, JobModel
@@ -76,16 +76,10 @@ class CompanyRepository:
         )
         return list(self.session.execute(stmt).scalars().all())
 
-    def upsert_company(self, company: Union[Company, CompanyModel]) -> CompanyModel:
-        """Upsert a company avoiding duplicates without overwriting values with null.
-
-        Deduplication Strategy:
-            1. Primary: Match by canonical normalized_website.
-            2. Secondary Fallback: Match by normalized_name if website is unknown/fallback.
-            3. On Match: Merge non-null fields from incoming record into existing record.
-               Preserve existing non-null fields when incoming values are None.
-        """
-        # Determine normalized values
+    def upsert_company_with_status(
+        self, company: Union[Company, CompanyModel]
+    ) -> Tuple[CompanyModel, bool]:
+        """Upsert a company returning the persisted model and a boolean (True if created, False if updated)."""
         if isinstance(company, CompanyModel):
             norm_website = company.normalized_website
             norm_name = company.normalized_name
@@ -95,13 +89,11 @@ class CompanyRepository:
 
         existing = self.get_company_by_website(norm_website)
         if not existing and norm_name:
-            # Fallback check on normalized name
             existing = self.get_company_by_normalized_name(norm_name)
 
         now = datetime.now(timezone.utc)
 
         if existing:
-            # Update fields only if incoming value is not None and not empty string
             fields_to_check = [
                 "company_name",
                 "website",
@@ -122,14 +114,18 @@ class CompanyRepository:
             existing.updated_at = now
             existing.last_verified_at = now
             self.session.flush()
-            return existing
+            return existing, False
 
-        # Create fresh record
         new_model = self._to_model(company)
         new_model.last_verified_at = now
         self.session.add(new_model)
         self.session.flush()
-        return new_model
+        return new_model, True
+
+    def upsert_company(self, company: Union[Company, CompanyModel]) -> CompanyModel:
+        """Upsert a company avoiding duplicates without overwriting values with null."""
+        model, _ = self.upsert_company_with_status(company)
+        return model
 
 
 class JobRepository:
@@ -142,6 +138,8 @@ class JobRepository:
         """Convert domain Job to JobModel if needed."""
         if isinstance(job, JobModel):
             return job
+        if job.company_id is None:
+            raise ValueError("Job must be linked to a company_id before persistence.")
         return JobModel(
             company_id=job.company_id,
             job_title=job.job_title,
@@ -193,19 +191,14 @@ class JobRepository:
         )
         return list(self.session.execute(stmt).scalars().all())
 
-    def upsert_job(self, job: Union[Job, JobModel]) -> JobModel:
-        """Upsert a job avoiding duplicates and updating timestamps.
-
-        Deduplication Strategy:
-            1. Primary: Match by (company_id, source_name, source_job_id) if source_job_id exists.
-            2. Secondary: Match by (company_id, normalized_job_url).
-            3. Fallback (Cross-Source): Match by (company_id, normalized_title, location).
-            4. On Match:
-               - Update last_seen_at to now.
-               - Update status to 'open'.
-               - Merge non-null fields (description, location, etc.) without overwriting with null.
-        """
+    def upsert_job_with_status(
+        self, job: Union[Job, JobModel]
+    ) -> Tuple[JobModel, bool]:
+        """Upsert a job returning the persisted model and a boolean (True if created, False if updated)."""
         company_id = job.company_id
+        if company_id is None:
+            raise ValueError("Job must be linked to a company_id before persistence.")
+
         source_name = job.source_name
         source_job_id = job.source_job_id
         norm_url = (
@@ -257,7 +250,6 @@ class JobRepository:
         now = datetime.now(timezone.utc)
 
         if existing:
-            # Merge non-null fields
             fields_to_check = [
                 "job_title",
                 "description",
@@ -277,13 +269,16 @@ class JobRepository:
             existing.updated_at = now
             existing.status = getattr(job, "status", "open") or "open"
             self.session.flush()
-            return existing
+            return existing, False
 
-        # Create new job
         new_model = self._to_model(job)
         new_model.first_seen_at = now
         new_model.last_seen_at = now
         self.session.add(new_model)
         self.session.flush()
-        return new_model
+        return new_model, True
 
+    def upsert_job(self, job: Union[Job, JobModel]) -> JobModel:
+        """Upsert a job avoiding duplicates and updating timestamps."""
+        model, _ = self.upsert_job_with_status(job)
+        return model
