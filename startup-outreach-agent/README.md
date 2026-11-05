@@ -4,16 +4,22 @@ A modular, personal automation system designed to discover early-stage startups 
 
 ---
 
-## Current Status: Prompt 4 (Resume-Based Job Matching & Ranking)
+## Current Status: Prompt 4.2 (Final Matching Edge Cases Before Email Generation)
 
-The application includes:
-- **Configurable Candidate Profile**: Located at `config/candidate_profile.yaml` with verified education, skills, projects (SehatSaathi, Notification Engine, Smart Airport Ride Pooling), and internship experience (Lipi Data Systems).
-- **Resume Management & Safe Supplementation**: `ResumeExtractor` parses local PDF resumes with `pypdf`, extracting technical signals without overwriting verified manual configuration.
-- **Rule-Based Job Classification**: `JobClassifier` categorizes postings into `Software Development Intern`, `Backend Intern`, `AI/ML Intern`, `Full Stack Intern`, `Data Engineering Intern`, `General Software Engineering`, or `Unrelated or Unsuitable`.
-- **Internship Eligibility Engine**: `EligibilityFilter` categorizes candidates into `Eligible`, `Potentially Eligible`, `Ineligible`, or `Insufficient Information` based on student status, experience caps, and location.
-- **Explainable Match Scoring**: `OpportunityScorer` computes a deterministic 0–100 relevance score across Category Alignment (25%), Technical Skills Overlap (30%), Project Proof-of-Work (20%), Eligibility (15%), Location (10%), and Company Scale (+5% bonus). No LLM hallucinations or pseudo-probabilities.
-- **Opportunity Ranker**: `OpportunityRanker` queries stored database jobs, evaluates compatibility, and ranks opportunities with transparent reasoning, matching/missing skills, and warnings.
-- **Automated Tests**: 32 unit and integration tests passing deterministically.
+The matching engine includes targeted enhancements for edge cases:
+- **Ambiguous Engineering Titles**: Roles like `GTM Engineer` and `Sales Engineer` are no longer classified as core SWE purely because the title contains "Engineer". The classifier inspects the actual job description for substantive software development responsibilities (`shipping code`, `production systems`, `backend services`, `APIs`), classifying as `OTHER_UNKNOWN` / `UNRELATED` if evidence is insufficient or purely sales/marketing, while preserving genuinely technical opportunities (such as Pogo's GTM Engineer).
+- **Degree-Specific Eligibility**:
+  - `PhD Required` / `Master's Required` in description: Evaluated against candidate's verified undergraduate education (B.Tech in progress) -> `Ineligible`.
+  - `PhD Preferred` / `Master's Preferred`: -> `Potentially Eligible` with a warning flag.
+  - `PhD in Title` with missing ATS description (e.g. Figma PhD Intern): Flagged as `Insufficient Information` with clear explanation rather than assuming student eligibility.
+  - `Bachelor's / Undergrad Accepted`: Verified as directly matching.
+  - Missing degree requirements: Never assumed or invented.
+- **Tightly Coupled Project Proof Evidence**: Project evidence scoring eliminates overcounting on generic words ("AI", "API", "backend", "software"). Evidence is tied to verified technical implementations:
+  - *SehatSaathi*: Specific RAG, vector databases (Qdrant), LLMs, AI agents, and FastAPI.
+  - *Notification Engine*: Distributed queues (BullMQ, Kafka, RabbitMQ), event streaming, Redis brokers, and background workers.
+  - *Smart Airport Ride Pooling*: Geospatial indexing (2dsphere), concurrency/locking, ride pooling dispatch algorithms, and high-throughput databases.
+  - *Lipi Data Systems*: Verified internship responsibilities (React Native mobile, MVC REST route architecture, GPS telemetry).
+- **Automated Tests**: 37 unit and integration tests passing with 100% test suite success.
 
 > **Note:** Telegram alerts, Gmail draft creation, and automated outreach remain intentionally deferred to subsequent prompts.
 
@@ -30,19 +36,21 @@ Candidate Profile (config/candidate_profile.yaml)
          Retrieves Stored Jobs from DB
                      │
                      ▼
-            JobClassifier (Rule-Based)
+          JobClassifier (Rule-Based)
+   ├── OpportunityType (Internship vs FT vs Senior)
+   └── JobCategory (AI/ML, Backend, Full Stack, Unrelated)
                      │
                      ▼
-           EligibilityFilter (Student/Intern/Exp)
+          EligibilityFilter (Decoupled)
+   ├── Student Status & Experience Level
+   └── Work Authorization & Geographic Constraints
                      │
                      ▼
-          OpportunityScorer (0–100 pts)
-    ├── Category Alignment (25 pts)
-    ├── Technical Skills Overlap (30 pts)
-    ├── Project Alignment (20 pts)
-    ├── Eligibility (15 pts)
-    ├── Location & Work Arrangement (10 pts)
-    └── Startup Scale Bonus (up to +5 pts)
+       OpportunityScorer (Strict 0–100 pts)
+   ├── Role Alignment (0–25 pts)
+   ├── Technical Skills Overlap (0–40 pts, Scaled)
+   ├── Project Proof-of-Work Evidence (0–25 pts)
+   └── Experience / Seniority Fit (0–10 pts)
                      │
                      ▼
      Ranked Opportunities Leaderboard (--match)
@@ -134,38 +142,45 @@ python run.py --match
 
 Example output:
 ```text
-==============================================================================
+================================================================================
        OPPORTUNITY MATCHING & RANKING REPORT: SIDDHARTH RANKA       
-==============================================================================
- Target Education : B.Tech in Computer Science and Engineering
- Institution      : BML Munjal University (Expected Jun 2028)
- Verified Skills  : 37 technical signals loaded
-==============================================================================
+================================================================================
+ Candidate Profile : Siddharth Ranka (B.Tech CSE, BML Munjal University)
+ Expected Grad     : Jun 2028 | Status: Current Student
+ Target Roles      : Software Development Intern, Backend Intern, AI/ML Intern, Full Stack Intern, Data Engineering Intern, General Software Engineering
+ Verified Skills   : 37 technical signals loaded
+================================================================================
 
-Top Ranked Opportunities:
+Top 20 Evaluated Opportunities:
 
-#1  [ 83.0/100] Full Stack Engineer @ Pogo [Potentially Eligible]
-    Category      : General Software Engineering
-    Location      : United States/Canada
-    Skills Match  : Llm
-    Profile Proof : SehatSaathi (FastAPI, Hybrid RAG, Vector DB), Notification Engine (BullMQ, Redis, Node.js), Lipi Data Systems Internship (REST APIs, MVC), Smart Airport Ride Pooling (Fullstack Architecture)
-    Apply URL     : https://jobs.ashbyhq.com/joinpogo/e6338078-0adc-4ab3-9f72-9e433a9a40bf
-    Website       : https://www.joinpogo.com
-    Notes/Warnings: On-site/hybrid location: 'United States/Canada'. May require work authorization or relocation.
-------------------------------------------------------------------------------
-#2  [ 78.0/100] GTM Engineer @ Pogo [Potentially Eligible]
-    Category      : General Software Engineering
-    Location      : United States/Canada
+#1  [ 68.0/100] GTM Engineer @ Pogo
+    Type & Status : [Regular Full-Time] | [Potentially Eligible]
+    Category      : General Software Engineering | Location: United States/Canada
+    Score Detail  : Role: 15.0/25 | Skills: 28.0/40 | Projects: 20.0/25 | Exp: 5.0/10 (Completeness: Adequate)
     Skills Match  : Llm, Rag
-    Profile Proof : SehatSaathi (FastAPI, Hybrid RAG, Vector DB), Notification Engine (BullMQ, Redis, Node.js)
+    Proof Points  : SehatSaathi (FastAPI, Hybrid RAG, Qdrant), Notification Engine (BullMQ, Redis, Node.js), Lipi Data Systems Internship (REST APIs, MVC)
+    Work Auth     : On-site/hybrid role located in 'United States/Canada'. Does not assume visa sponsorship.
     Apply URL     : https://jobs.ashbyhq.com/joinpogo/f1ce7a4b-ad61-48d7-afc7-0088da404b81
     Website       : https://www.joinpogo.com
-------------------------------------------------------------------------------
-#3  [ 63.0/100] PhD Intern, AI Applied Scientist (2027) @ Figma [Potentially Eligible]
-    Category      : AI/ML Intern
-    Location      : San Francisco, CA • New York, NY
-    Profile Proof : SehatSaathi (FastAPI, Hybrid RAG, Vector DB)
-    Apply URL     : https://boards.greenhouse.io/figma/jobs/6207801004
+--------------------------------------------------------------------------------
+#2  [ 58.0/100] Full Stack Engineer @ Pogo
+    Type & Status : [Regular Full-Time] | [Potentially Eligible]
+    Category      : General Software Engineering | Location: United States/Canada
+    Score Detail  : Role: 15.0/25 | Skills: 15.0/40 | Projects: 25.0/25 | Exp: 3.0/10 (Completeness: Adequate)
+    Skills Match  : Llm
+    Proof Points  : SehatSaathi (FastAPI, Hybrid RAG, Qdrant), Notification Engine (BullMQ, Redis, Node.js), Lipi Data Systems Internship (REST APIs, MVC), Smart Airport Ride Pooling (Fullstack Architecture)
+    Work Auth     : On-site/hybrid role located in 'United States/Canada'. Does not assume visa sponsorship.
+    Notes/Warnings: Position specifies 2-4 years experience; student applicant will need strong justification.
+    Apply URL     : https://jobs.ashbyhq.com/joinpogo/e6338078-0adc-4ab3-9f72-9e433a9a40bf
+    Website       : https://www.joinpogo.com
+--------------------------------------------------------------------------------
+#3  [ 35.0/100] PhD Intern, AI Applied Scientist (2027) @ Figma
+    Type & Status : [Internship] | [Insufficient Information]
+    Category      : AI/ML Intern | Location: San Francisco, CA • New York, NY
+    Score Detail  : Role: 25.0/25 | Skills: 0.0/40 | Projects: 0.0/25 | Exp: 10.0/10 (Completeness: Missing)
+    Work Auth     : On-site/hybrid role located in 'San Francisco, CA • New York, NY'. Does not assume visa sponsorship.
+    Notes/Warnings: Role title specifies PhD Intern, but job description is unavailable in ATS.; Insufficient job description information for reliable technical matching.
+    Apply URL     : https://boards.greenhouse.io/figma/jobs/6207801004?gh_jid=6207801004
     Website       : https://www.figma.com
 ```
 
@@ -173,4 +188,4 @@ Top Ranked Opportunities:
 ```bash
 pytest -v
 ```
-*(32 passed in ~10s)*
+*(37 passed in ~2s)*

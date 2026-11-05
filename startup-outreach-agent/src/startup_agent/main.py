@@ -76,44 +76,68 @@ def print_discovery_report(summary: DiscoverySummary) -> None:
 
 def print_matching_report(results: List[MatchResult], profile: CandidateProfile) -> None:
     """Display explainable matching results and rankings."""
-    print("\n" + "=" * 78)
+    print("\n" + "=" * 80)
     print(f"       OPPORTUNITY MATCHING & RANKING REPORT: {profile.name.upper()}       ")
-    print("=" * 78)
-    print(f" Target Education : {profile.current_education.degree}")
-    print(f" Institution      : {profile.current_education.institution} ({profile.current_education.expected_graduation})")
-    print(f" Verified Skills  : {len(profile.all_skills)} technical signals loaded")
-    print("=" * 78)
+    print("=" * 80)
+    print(f" Candidate Profile : {profile.name} (B.Tech CSE, {profile.current_education.institution})")
+    print(f" Expected Grad     : {profile.current_education.expected_graduation} | Status: Current Student")
+    print(f" Target Roles      : {', '.join(profile.preferences.target_roles)}")
+    print(f" Verified Skills   : {len(profile.all_skills)} technical signals loaded")
+    print("=" * 80)
 
-    eligible_results = [
+    eligible_count = sum(1 for r in results if r.eligibility_status == EligibilityStatus.ELIGIBLE)
+    potential_count = sum(1 for r in results if r.eligibility_status == EligibilityStatus.POTENTIALLY_ELIGIBLE)
+    insufficient_count = sum(1 for r in results if r.eligibility_status == EligibilityStatus.INSUFFICIENT_INFO)
+    ineligible_count = sum(1 for r in results if r.eligibility_status == EligibilityStatus.INELIGIBLE)
+
+    display_results = [
         r for r in results if r.eligibility_status != EligibilityStatus.INELIGIBLE
     ]
-    ineligible_count = len(results) - len(eligible_results)
 
-    if not eligible_results:
+    if not display_results:
         print("\nNo eligible opportunities found matching criteria in the database.")
         print(f"({ineligible_count} postings evaluated and filtered out as ineligible/unrelated).\n")
         return
 
-    print(f"\nTop {min(15, len(eligible_results))} Ranked Opportunities:\n")
-    for idx, r in enumerate(eligible_results[:15], start=1):
+    print(f"\nTop {min(20, len(display_results))} Evaluated Opportunities:\n")
+    for idx, r in enumerate(display_results[:20], start=1):
         status_tag = f"[{r.eligibility_status.value}]"
-        print(f"#{idx:<2} [{r.match_score:5.1f}/100] {r.job_title} @ {r.company_name} {status_tag}")
-        print(f"    Category      : {r.category}")
-        print(f"    Location      : {r.location or 'Unlisted / Remote'}")
+        opp_type_tag = f"[{r.opportunity_type.value}]"
+        print(f"#{idx:<2} [{r.match_score:5.1f}/100] {r.job_title} @ {r.company_name}")
+        print(f"    Type & Status : {opp_type_tag} | {status_tag}")
+        print(f"    Category      : {r.category} | Location: {r.location or 'Unlisted / Remote'}")
+
+        sb = r.score_breakdown
+        breakdown_str = (
+            f"Role: {sb.get('role_alignment', 0.0):.1f}/25 | "
+            f"Skills: {sb.get('skills_score', 0.0):.1f}/40 | "
+            f"Projects: {sb.get('project_evidence', 0.0):.1f}/25 | "
+            f"Exp: {sb.get('experience_fit', 0.0):.1f}/10"
+        )
+        print(f"    Score Detail  : {breakdown_str} (Completeness: {r.description_completeness})")
+
         if r.matching_skills:
             print(f"    Skills Match  : {', '.join(r.matching_skills)}")
         if r.missing_skills:
             print(f"    Missing Skills: {', '.join(r.missing_skills)}")
         if r.relevant_projects:
-            print(f"    Profile Proof : {', '.join(r.relevant_projects)}")
+            print(f"    Proof Points  : {', '.join(r.relevant_projects)}")
+        if r.work_auth_warning:
+            print(f"    Work Auth     : {r.work_auth_warning}")
+        if r.warnings:
+            other_warns = [w for w in r.warnings if w != r.work_auth_warning]
+            if other_warns:
+                print(f"    Notes/Warnings: {'; '.join(other_warns)}")
         print(f"    Apply URL     : {r.job_url}")
         if r.company_website:
             print(f"    Website       : {r.company_website}")
-        if r.warnings:
-            print(f"    Notes/Warnings: {'; '.join(r.warnings)}")
-        print("-" * 78)
+        print("-" * 80)
 
-    print(f"\nSummary: {len(eligible_results)} opportunities qualified | {ineligible_count} postings filtered as ineligible/senior/unrelated.\n")
+    print(
+        f"\nAudit Summary: {len(results)} total evaluated | "
+        f"{eligible_count} Eligible | {potential_count} Potentially Eligible | "
+        f"{insufficient_count} Insufficient Info | {ineligible_count} Ineligible\n"
+    )
 
 
 def main(argv: Optional[List[str]] = None) -> int:

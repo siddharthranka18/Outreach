@@ -1,6 +1,6 @@
 """Candidate matching, job classification, and opportunity ranking package."""
 
-from startup_agent.matching.classifier import JobCategory, JobClassifier
+from startup_agent.matching.classifier import JobCategory, JobClassifier, OpportunityType
 from startup_agent.matching.eligibility import EligibilityFilter, EligibilityResult, EligibilityStatus
 from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.ranker import OpportunityRanker
@@ -11,6 +11,7 @@ __all__ = [
     "CandidateProfile",
     "JobCategory",
     "JobClassifier",
+    "OpportunityType",
     "EligibilityFilter",
     "EligibilityResult",
     "EligibilityStatus",
@@ -19,4 +20,3 @@ __all__ = [
     "ResumeExtractor",
     "MatchResult",
 ]
-
