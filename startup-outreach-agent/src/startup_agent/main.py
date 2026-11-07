@@ -71,6 +71,8 @@ def print_discovery_report(summary: DiscoverySummary) -> None:
     print(f" Advertised Jobs Found   : {summary.jobs_discovered}")
     print(f"   - New Insertions      : {summary.jobs_inserted}")
     print(f"   - Existing Updated    : {summary.jobs_updated}")
+    print(f" ATS Boards Expanded     : {summary.ats_boards_expanded}")
+    print(f" ATS Jobs Enriched       : {summary.ats_jobs_enriched}")
     print("=" * 65 + "\n")
 
 

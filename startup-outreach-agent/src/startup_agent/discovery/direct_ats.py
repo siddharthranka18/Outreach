@@ -3,6 +3,8 @@
 from datetime import datetime
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+from bs4 import BeautifulSoup
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
@@ -10,21 +12,58 @@ from startup_agent.utils.http_client import HttpClient
 
 logger = logging.getLogger("startup_agent.discovery.ats")
 
-# Configured default ATS startup boards for official API ingestion
-DEFAULT_ATS_TARGETS = [
-    {
-        "platform": "ashby",
-        "board_token": "joinpogo",
-        "company_name": "Pogo",
-        "website": "https://www.joinpogo.com",
-    },
-    {
-        "platform": "greenhouse",
-        "board_token": "figma",
-        "company_name": "Figma",
-        "website": "https://www.figma.com",
-    },
-]
+DEFAULT_ATS_TARGETS: List[Dict[str, str]] = []
+
+
+def extract_ats_target(
+    job_url: str,
+    company_name: str,
+    website: str,
+    employee_count: Optional[str] = None,
+) -> Optional[Dict[str, str]]:
+    """Derive a public ATS board identifier from a discovered job URL."""
+    parsed = urlparse(job_url)
+    host = parsed.netloc.lower()
+    path_parts = [part for part in parsed.path.split("/") if part]
+    platform: Optional[str] = None
+    board_token: Optional[str] = None
+
+    if host in {"jobs.ashbyhq.com", "api.ashbyhq.com"} and path_parts:
+        platform = "ashby"
+        board_token = path_parts[0]
+    elif host in {
+        "boards.greenhouse.io",
+        "job-boards.greenhouse.io",
+        "boards-api.greenhouse.io",
+    } and path_parts:
+        platform = "greenhouse"
+        if host == "boards-api.greenhouse.io" and "boards" in path_parts:
+            board_index = path_parts.index("boards")
+            if board_index + 1 < len(path_parts):
+                board_token = path_parts[board_index + 1]
+        else:
+            board_token = path_parts[0]
+    elif host in {"jobs.lever.co", "api.lever.co"} and path_parts:
+        platform = "lever"
+        if host == "api.lever.co" and "postings" in path_parts:
+            postings_index = path_parts.index("postings")
+            if postings_index + 1 < len(path_parts):
+                board_token = path_parts[postings_index + 1]
+        else:
+            board_token = path_parts[0]
+
+    if not platform or not board_token:
+        return None
+
+    target = {
+        "platform": platform,
+        "board_token": board_token,
+        "company_name": company_name,
+        "website": website,
+    }
+    if employee_count:
+        target["employee_count"] = employee_count
+    return target
 
 
 class DirectAtsDiscoverySource(BaseDiscoverySource):
@@ -65,9 +104,14 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
             posted_at = None
             if raw.get("updated_at"):
                 try:
-                    posted_at = datetime.fromisoformat(raw["updated_at"])
+                    posted_at = datetime.fromisoformat(raw["updated_at"].replace("Z", "+00:00"))
                 except Exception:
                     pass
+
+            raw_content = raw.get("content")
+            description = None
+            if raw_content:
+                description = BeautifulSoup(raw_content, "html.parser").get_text(" ", strip=True)
 
             jobs.append(
                 Job(
@@ -77,6 +121,7 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
                     company_name=company_name,
                     company_website=website,
                     location=location or None,
+                    description=description,
                     source_job_id=str(raw.get("id")) if raw.get("id") else None,
                     posted_at=posted_at,
                     status="open",
@@ -118,7 +163,7 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
                     company_website=website,
                     location=raw.get("location"),
                     employment_type=raw.get("employmentType"),
-                    description=raw.get("descriptionPlain"),
+                    description=raw.get("descriptionPlain") or raw.get("description"),
                     source_job_id=str(raw.get("id")) if raw.get("id") else None,
                     posted_at=posted_at,
                     status="open",
@@ -158,7 +203,11 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
                     company_website=website,
                     location=location,
                     employment_type=commitment,
-                    description=raw.get("descriptionPlain"),
+                    description=(
+                        raw.get("descriptionPlain")
+                        or BeautifulSoup(raw.get("description") or "", "html.parser").get_text(" ", strip=True)
+                        or None
+                    ),
                     source_job_id=str(raw.get("id")) if raw.get("id") else None,
                     status="open",
                 )
@@ -181,7 +230,7 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
             website = target.get("website", "")
             board_token = target.get("board_token", "")
 
-            if not company_name or not website:
+            if not company_name or not website or platform not in {"greenhouse", "ashby", "lever"}:
                 continue
 
             # Ensure company representation is included
@@ -191,7 +240,8 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
                         company_name=company_name,
                         website=website,
                         source_name=f"ats:{platform}",
-                        source_url=f"https://boards-api.{platform}.io/{board_token}",
+                        source_url=target.get("source_url") or website,
+                        employee_count=target.get("employee_count"),
                         hiring_status="Actively Hiring",
                     )
                 )

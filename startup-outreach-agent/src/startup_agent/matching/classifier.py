@@ -114,8 +114,20 @@ EXCLUDED_ROLES = [
     r"\bvideo editor\b",
     r"\bconsultant\b",
     r"\binsights consultant\b",
+    r"\bsolutions associate\b",
+    r"\bimplementation consultant\b",
+    r"\btechnical account manager\b",
+    r"\bcustomer engineer\b",
     r"\bcontent creator\b",
+    r"\bcreator internship\b",
+    r"\bsocial media creator\b",
+    r"\binfluencer\b",
     r"\bcopywriter\b",
+    r"\bmechanical engineer(?:ing)?\b",
+    r"\belectrical engineer(?:ing)?\b",
+    r"\bcivil engineer(?:ing)?\b",
+    r"\bchemical engineer(?:ing)?\b",
+    r"\bhardware engineer(?:ing)?\b",
 ]
 
 
@@ -236,6 +248,19 @@ class JobClassifier:
         if self.is_unrelated(title):
             return JobCategory.UNRELATED
 
+        # Domain words such as "AI" do not make a commercial/operations title
+        # a software role. Require an explicit build/research/student signal.
+        core_technical_title = bool(
+            re.search(
+                r"\b(engineer(?:ing)?|developer|programmer|software|backend|back-end|frontend|front-end|full[ -]?stack|"
+                r"data scientist|data engineer|machine learning|ml engineer|research scientist|computer vision|"
+                r"devops|site reliability|sre|intern|internship|co-?op|apprentice)\b",
+                title_lower,
+            )
+        )
+        if not core_technical_title:
+            return JobCategory.UNRELATED
+
         # Handle ambiguous engineering titles (e.g. GTM Engineer, Sales Engineer)
         if self.is_ambiguous_engineering(title):
             if not self.has_software_engineering_responsibilities(description):
@@ -268,6 +293,9 @@ class JobClassifier:
         if any(kw in title_lower for kw in ["data engineer", "etl", "data pipeline"]):
             return JobCategory.DATA_ENGINEERING
 
+        if any(kw in title_lower for kw in ["robotics", "robot", "autonomy", "embedded software"]):
+            return JobCategory.SOFTWARE_DEV
+
         if any(kw in title_lower for kw in ["software", "sde", "developer", "engineer", "programmer", "systems"]):
             return JobCategory.SOFTWARE_DEV
 
@@ -290,6 +318,9 @@ class JobClassifier:
         )
         cat = self.classify_category(title, description)
 
+        if cat == JobCategory.UNRELATED:
+            return JobCategory.UNRELATED
+
         is_intern = opp_type in (OpportunityType.INTERNSHIP, OpportunityType.COOP_STUDENT)
 
         if is_intern:
@@ -306,8 +337,5 @@ class JobClassifier:
             if cat == JobCategory.DATA_ENGINEERING:
                 return JobCategory.DATA_ENG_INTERN
             return JobCategory.SOFTWARE_DEV_INTERN
-
-        if cat == JobCategory.UNRELATED:
-            return JobCategory.UNRELATED
 
         return JobCategory.GENERAL_SWE

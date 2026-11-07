@@ -250,10 +250,38 @@ class EligibilityFilter:
         # 3. Location and Work Authorization Evaluation
         loc_str = (location or "").lower()
         is_remote = any(kw in loc_str for kw in ["remote", "anywhere", "virtual", "wfh"])
-        is_india = any(kw in loc_str for kw in ["india", "gurgaon", "delhi", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "noida"])
+        is_india = any(
+            kw in loc_str
+            for kw in [
+                "india",
+                "gurgaon",
+                "gurugram",
+                "delhi",
+                "bengaluru",
+                "bangalore",
+                "hyderabad",
+                "pune",
+                "mumbai",
+                "noida",
+                "remote (in)",
+                " / in",
+                ", in",
+            ]
+        )
 
         # Check if remote has geographic restrictions
-        us_only_remote = any(kw in loc_str for kw in ["us remote", "united states - remote", "us/canada", "us only"])
+        us_only_remote = any(
+            kw in loc_str
+            for kw in [
+                "us remote",
+                "remote us",
+                "remote (us)",
+                "us / remote",
+                "united states - remote",
+                "us/canada",
+                "us only",
+            ]
+        )
         if is_remote and us_only_remote:
             work_auth_warning = "Remote is geographically restricted (US/Canada). May require local authorization or US entity."
             flags.append(work_auth_warning)

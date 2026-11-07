@@ -47,6 +47,11 @@ def test_job_classification() -> None:
     assert classifier.classify("Account Executive, Enterprise") == JobCategory.UNRELATED
     assert classifier.classify("Senior Recruiter") == JobCategory.UNRELATED
     assert classifier.classify("Preschool Daycare Teacher") == JobCategory.UNRELATED
+    assert classifier.classify("AI Solutions Associate") == JobCategory.UNRELATED
+    assert classifier.classify("Creator Internship") == JobCategory.UNRELATED
+    assert classifier.classify("Robotics Intern") == JobCategory.SOFTWARE_DEV_INTERN
+    assert classifier.classify("Electrical Engineering Intern") == JobCategory.UNRELATED
+    assert classifier.classify("Mechanical Engineering Placement, New Grad") == JobCategory.UNRELATED
     assert classifier.classify("Finance Operations Lead") == JobCategory.UNRELATED
     assert classifier.classify("Demand Generation Manager") == JobCategory.UNRELATED
     assert classifier.classify("Product Marketing Manager") == JobCategory.UNRELATED
@@ -363,6 +368,44 @@ def test_strict_fresher_filter_rejects_unknown_role_type(
 
     assert result.status == EligibilityStatus.INELIGIBLE
     assert any("not explicitly identified" in reason for reason in result.reasons)
+
+
+def test_us_restricted_remote_intern_is_not_marked_fully_eligible(
+    sample_profile: CandidateProfile,
+) -> None:
+    """Remote (US) still requires geographic/work-authorization review."""
+    result = EligibilityFilter(sample_profile).evaluate(
+        title="Software Engineering Intern",
+        category=JobCategory.SOFTWARE_DEV_INTERN,
+        opportunity_type=OpportunityType.INTERNSHIP,
+        description=(
+            "Undergraduate interns will build Python backend services and production APIs "
+            "with the software engineering team."
+        ),
+        location="US / Remote (US)",
+    )
+
+    assert result.status == EligibilityStatus.POTENTIALLY_ELIGIBLE
+    assert result.work_auth_warning is not None
+
+
+def test_gurugram_internship_is_domestic_and_eligible(
+    sample_profile: CandidateProfile,
+) -> None:
+    """Gurugram and Indian location codes are recognized as domestic."""
+    result = EligibilityFilter(sample_profile).evaluate(
+        title="Backend Engineer Intern",
+        category=JobCategory.BACKEND_INTERN,
+        opportunity_type=OpportunityType.INTERNSHIP,
+        description=(
+            "Undergraduate interns will build Python backend services, REST APIs, and "
+            "production database integrations with the engineering team."
+        ),
+        location="Gurugram, HR, IN / Gurugram, Haryana, IN",
+    )
+
+    assert result.status == EligibilityStatus.ELIGIBLE
+    assert result.work_auth_warning is None
 
 
 def test_resume_extractor_safe_supplementation(tmp_path: Path, sample_profile: CandidateProfile) -> None:

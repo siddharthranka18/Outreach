@@ -17,5 +17,5 @@ sources:
   - name: "company_career_sites"
     display_name: "Direct Career Pages & ATS"
     type: "direct_ats"
-    enabled: true
-    description: "Direct company career portals and public ATS endpoints (Greenhouse, Lever, Ashby)."
+    enabled: false
+    description: "ATS boards are discovered automatically from small-startup job links; reserved for future manually seeded boards."

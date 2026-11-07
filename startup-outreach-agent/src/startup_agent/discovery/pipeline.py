@@ -11,12 +11,17 @@ from startup_agent.database.engine import create_db_engine
 from startup_agent.database.repositories import CompanyRepository, JobRepository
 from startup_agent.database.session import create_session_factory, session_scope
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
-from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource
+from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
 from startup_agent.discovery.y_combinator import YCombinatorDiscoverySource
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 from startup_agent.utils.normalizers import normalize_name, normalize_website
+from startup_agent.matching.startup_filter import (
+    StartupEligibilityFilter,
+    StartupEligibilityStatus,
+)
+from startup_agent.utils.http_client import HttpClient
 
 logger = logging.getLogger("startup_agent.discovery.pipeline")
 
@@ -42,6 +47,8 @@ class DiscoverySummary:
     jobs_discovered: int = 0
     jobs_inserted: int = 0
     jobs_updated: int = 0
+    ats_boards_expanded: int = 0
+    ats_jobs_enriched: int = 0
     duration_seconds: float = 0.0
 
     @property
@@ -63,10 +70,19 @@ class DiscoveryPipeline:
         settings: Optional[Settings] = None,
         session: Optional[Session] = None,
         custom_adapters: Optional[List[BaseDiscoverySource]] = None,
+        ats_http_client: Optional[HttpClient] = None,
+        auto_expand_ats: bool = True,
+        max_startup_employees: int = 200,
     ) -> None:
         self.settings = settings or Settings.load()
         self.session = session
         self.custom_adapters = custom_adapters
+        self.ats_http_client = ats_http_client
+        self.auto_expand_ats = auto_expand_ats
+        self.startup_filter = StartupEligibilityFilter(
+            max_employees=max_startup_employees,
+            allow_unknown=False,
+        )
 
     def _resolve_adapters(self) -> List[BaseDiscoverySource]:
         """Resolve enabled source adapter instances based on configuration."""
@@ -129,7 +145,20 @@ class DiscoveryPipeline:
         summary.companies_discovered = len(collected_companies)
         summary.jobs_discovered = len(collected_jobs)
 
-        # 2. Persistence Phase within Transactional Scope
+        # 2. Expand public ATS boards exposed by confirmed small-startup job URLs.
+        if self.auto_expand_ats:
+            ats_result, board_count = self._expand_discovered_ats_boards(
+                collected_companies, collected_jobs
+            )
+            if board_count:
+                collected_companies.extend(ats_result.companies)
+                collected_jobs.extend(ats_result.jobs)
+                summary.ats_boards_expanded = board_count
+                summary.ats_jobs_enriched = len(ats_result.jobs)
+                summary.companies_discovered = len(collected_companies)
+                summary.jobs_discovered = len(collected_jobs)
+
+        # 3. Persistence Phase within Transactional Scope
         if self.session is not None:
             self._persist_entities(self.session, collected_companies, collected_jobs, summary)
         else:
@@ -150,6 +179,60 @@ class DiscoveryPipeline:
             summary.jobs_updated,
         )
         return summary
+
+    def _expand_discovered_ats_boards(
+        self,
+        companies: List[Company],
+        jobs: List[Job],
+    ) -> Tuple[DiscoveryResult, int]:
+        """Expand ATS job links into complete public boards for confirmed small startups."""
+        company_by_website = {
+            company.normalized_website: company for company in companies
+        }
+        company_by_name = {
+            company.normalized_name: company for company in companies
+        }
+        targets: List[Dict[str, str]] = []
+        seen_boards = set()
+
+        for job in jobs:
+            company = None
+            if job.company_website:
+                company = company_by_website.get(normalize_website(job.company_website))
+            if company is None and job.company_name:
+                company = company_by_name.get(normalize_name(job.company_name))
+            if company is None:
+                continue
+
+            size_result = self.startup_filter.evaluate(company.employee_count)
+            if size_result.status != StartupEligibilityStatus.ELIGIBLE:
+                continue
+
+            target = extract_ats_target(
+                job_url=job.job_url,
+                company_name=company.company_name,
+                website=company.website,
+                employee_count=company.employee_count,
+            )
+            if target is None:
+                continue
+
+            board_key = (target["platform"], target["board_token"])
+            if board_key in seen_boards:
+                continue
+            seen_boards.add(board_key)
+            targets.append(target)
+
+        if not targets:
+            return DiscoveryResult(), 0
+
+        logger.info("Auto-expanding %d public ATS boards from small-startup listings.", len(targets))
+        adapter = DirectAtsDiscoverySource(
+            name="auto_discovered_ats",
+            targets=targets,
+            http_client=self.ats_http_client,
+        )
+        return adapter.discover(), len(targets)
 
     def _persist_entities(
         self,
