@@ -11,6 +11,10 @@ from startup_agent.database.models import CompanyModel, JobModel
 from startup_agent.database.session import create_session_factory, session_scope
 from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.scorer import MatchResult, OpportunityScorer
+from startup_agent.matching.startup_filter import (
+    StartupEligibilityFilter,
+    StartupEligibilityStatus,
+)
 
 logger = logging.getLogger("startup_agent.matching.ranker")
 
@@ -28,6 +32,10 @@ class OpportunityRanker:
         self.profile = profile or CandidateProfile.load()
         self.session = session
         self.scorer = OpportunityScorer(self.profile)
+        self.startup_filter = StartupEligibilityFilter(
+            max_employees=self.profile.preferences.small_startup_max_employees,
+            allow_unknown=self.profile.preferences.allow_unknown_company_size,
+        )
 
     def rank_opportunities(
         self,
@@ -58,7 +66,21 @@ class OpportunityRanker:
         rows = session.execute(stmt).all()
 
         results: List[MatchResult] = []
+        company_eligibility_cache = {}
         for job_model, company_model in rows:
+            startup_eligibility = company_eligibility_cache.get(company_model.id)
+            if startup_eligibility is None:
+                startup_eligibility = self.startup_filter.evaluate(company_model.employee_count)
+                company_eligibility_cache[company_model.id] = startup_eligibility
+                if startup_eligibility.status != StartupEligibilityStatus.ELIGIBLE:
+                    logger.info(
+                        "Skipping company '%s': %s",
+                        company_model.company_name,
+                        startup_eligibility.reason,
+                    )
+            if startup_eligibility.status != StartupEligibilityStatus.ELIGIBLE:
+                continue
+
             match_res = self.scorer.score(
                 job_id=job_model.id,
                 job_title=job_model.job_title,

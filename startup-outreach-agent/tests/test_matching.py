@@ -11,6 +11,10 @@ from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.ranker import OpportunityRanker
 from startup_agent.matching.resume_extractor import ResumeExtractor
 from startup_agent.matching.scorer import OpportunityScorer
+from startup_agent.matching.startup_filter import (
+    StartupEligibilityFilter,
+    StartupEligibilityStatus,
+)
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 
@@ -111,7 +115,7 @@ def test_internship_eligibility_filtering(sample_profile: CandidateProfile) -> N
     )
     assert res_unrelated.status == EligibilityStatus.INELIGIBLE
 
-    # 4. Potentially Eligible with Work Auth warning: US Full-time role with full description
+    # 4. Ineligible: ordinary full-time role is outside strict fresher targeting
     res_us_ft = filter_engine.evaluate(
         title="Software Engineer",
         category=JobCategory.GENERAL_SWE,
@@ -120,9 +124,8 @@ def test_internship_eligibility_filtering(sample_profile: CandidateProfile) -> N
         description="Develop scalable backend services using Python and Postgres. Build high-throughput APIs and data pipelines for our platform.",
         experience_level="2-4 years",
     )
-    assert res_us_ft.status == EligibilityStatus.POTENTIALLY_ELIGIBLE
-    assert res_us_ft.work_auth_warning is not None
-    assert "US/Canada" in res_us_ft.work_auth_warning or "San Francisco, CA" in res_us_ft.work_auth_warning
+    assert res_us_ft.status == EligibilityStatus.INELIGIBLE
+    assert any("not explicitly marked" in reason for reason in res_us_ft.reasons)
 
     # 5. Insufficient Info: completely empty description
     res_minimal = filter_engine.evaluate(
@@ -275,6 +278,93 @@ def test_opportunity_ranking_order(db_session: Session, sample_profile: Candidat
     assert ranked[2].eligibility_status == EligibilityStatus.INELIGIBLE
 
 
+def test_small_startup_filter_boundaries() -> None:
+    """Only confirmed companies at or below the configured size are eligible."""
+    startup_filter = StartupEligibilityFilter(max_employees=200)
+
+    assert startup_filter.evaluate("1-10").status == StartupEligibilityStatus.ELIGIBLE
+    assert startup_filter.evaluate("51-200 employees").status == StartupEligibilityStatus.ELIGIBLE
+    assert startup_filter.evaluate("201-500").status == StartupEligibilityStatus.INELIGIBLE
+    assert startup_filter.evaluate("500+").status == StartupEligibilityStatus.INELIGIBLE
+    assert startup_filter.evaluate("101-250").status == StartupEligibilityStatus.UNKNOWN
+    assert startup_filter.evaluate(None).status == StartupEligibilityStatus.UNKNOWN
+
+
+def test_ranker_excludes_large_and_unknown_companies(
+    db_session: Session, sample_profile: CandidateProfile
+) -> None:
+    """The shortlist keeps broad discovery data but ranks only confirmed small startups."""
+    co_repo = CompanyRepository(db_session)
+    job_repo = JobRepository(db_session)
+
+    for name, domain, employee_count in [
+        ("Small Startup", "small.example", "11-50"),
+        ("Large Company", "large.example", "1001-5000"),
+        ("Unknown Company", "unknown.example", None),
+    ]:
+        company = co_repo.create_company(
+            Company(
+                company_name=name,
+                website=f"https://{domain}",
+                source_name="test",
+                source_url=f"https://{domain}",
+                employee_count=employee_count,
+            )
+        )
+        job_repo.create_job(
+            Job(
+                company_id=company.id,
+                job_title="Backend Engineering Intern",
+                job_url=f"https://{domain}/jobs/backend-intern",
+                source_name="test",
+                description=(
+                    "Undergraduate interns will build Python and FastAPI backend services "
+                    "with PostgreSQL, Docker, and production REST APIs."
+                ),
+                location="Remote",
+                employment_type="Internship",
+            )
+        )
+
+    ranked = OpportunityRanker(profile=sample_profile, session=db_session).rank_opportunities()
+
+    assert [result.company_name for result in ranked] == ["Small Startup"]
+
+
+def test_strict_fresher_experience_filtering(sample_profile: CandidateProfile) -> None:
+    """Experience-heavy descriptions are rejected even when ATS metadata is missing."""
+    filter_engine = EligibilityFilter(sample_profile)
+    result = filter_engine.evaluate(
+        title="Backend Engineer",
+        category=JobCategory.BACKEND,
+        opportunity_type=OpportunityType.REGULAR_FULL_TIME,
+        description=(
+            "Build backend services and APIs in Python. Candidates must have 3+ years "
+            "of professional software engineering experience."
+        ),
+        location="Remote",
+    )
+
+    assert result.status == EligibilityStatus.INELIGIBLE
+    assert any("fresher ceiling" in reason for reason in result.reasons)
+
+
+def test_strict_fresher_filter_rejects_unknown_role_type(
+    sample_profile: CandidateProfile,
+) -> None:
+    """A generic role cannot enter the shortlist without an early-career signal."""
+    result = EligibilityFilter(sample_profile).evaluate(
+        title="AI Researcher",
+        category=JobCategory.GENERAL_SWE,
+        opportunity_type=OpportunityType.OTHER_UNKNOWN,
+        description="",
+        location="San Francisco",
+    )
+
+    assert result.status == EligibilityStatus.INELIGIBLE
+    assert any("not explicitly identified" in reason for reason in result.reasons)
+
+
 def test_resume_extractor_safe_supplementation(tmp_path: Path, sample_profile: CandidateProfile) -> None:
     """Test that resume extraction supplements without overwriting existing verified profile data."""
     extractor = ResumeExtractor()
@@ -349,7 +439,7 @@ def test_degree_specific_eligibility(sample_profile: CandidateProfile) -> None:
     assert res_phd_req.status == EligibilityStatus.INELIGIBLE
     assert any("PhD" in r for r in res_phd_req.reasons)
 
-    # 2. PhD in title with missing description (e.g. Figma PhD Intern) -> Insufficient Information
+    # 2. PhD in title with missing description is still outside target scope
     res_phd_title_missing = filter_engine.evaluate(
         title="PhD Intern, AI Applied Scientist (2027)",
         category=JobCategory.AI_ML_INTERN,
@@ -357,8 +447,8 @@ def test_degree_specific_eligibility(sample_profile: CandidateProfile) -> None:
         location="San Francisco, CA",
         description="",
     )
-    assert res_phd_title_missing.status == EligibilityStatus.INSUFFICIENT_INFO
-    assert any("PhD Intern" in r for r in res_phd_title_missing.reasons)
+    assert res_phd_title_missing.status == EligibilityStatus.INELIGIBLE
+    assert any("PhD" in r for r in res_phd_title_missing.reasons)
 
     # 3. PhD in title with mandatory PhD description -> Ineligible
     res_phd_title_mandatory = filter_engine.evaluate(
@@ -434,12 +524,12 @@ def test_reduced_project_overcounting(sample_profile: CandidateProfile) -> None:
     # 2. Job with specific RAG / Vector search triggers only SehatSaathi
     res_rag = scorer.score(
         job_id=102,
-        job_title="AI Engineer",
+        job_title="AI Engineer Intern",
         company_name="VectorAI",
         job_url="https://vectorai.example/jobs/2",
         description="Build RAG pipelines and vector database retrieval systems using Qdrant and LLM agent frameworks.",
         location="Remote",
-        employment_type="Full-time",
+        employment_type="Internship",
     )
     assert res_rag.relevant_projects == ["SehatSaathi (FastAPI, Hybrid RAG, Qdrant)"]
     assert res_rag.score_breakdown["project_evidence"] == 10.0
@@ -447,12 +537,12 @@ def test_reduced_project_overcounting(sample_profile: CandidateProfile) -> None:
     # 3. Job with distributed queues triggers only Notification Engine
     res_queue = scorer.score(
         job_id=103,
-        job_title="Backend Systems Engineer",
+        job_title="Backend Systems Engineer Intern",
         company_name="QueueFlow",
         job_url="https://queueflow.example/jobs/3",
         description="Design distributed queue architecture, background worker processes, and message queues with RabbitMQ and BullMQ.",
         location="Remote",
-        employment_type="Full-time",
+        employment_type="Internship",
     )
     assert res_queue.relevant_projects == ["Notification Engine (BullMQ, Redis, Node.js)"]
     assert res_queue.score_breakdown["project_evidence"] == 8.0
@@ -460,12 +550,12 @@ def test_reduced_project_overcounting(sample_profile: CandidateProfile) -> None:
     # 4. Job with geospatial and concurrency triggers only Smart Airport
     res_geo = scorer.score(
         job_id=104,
-        job_title="Backend Engineer",
+        job_title="Backend Engineer Intern",
         company_name="FleetTech",
         job_url="https://fleettech.example/jobs/4",
         description="Implement geospatial 2dsphere indexing and high-throughput ride pooling dispatch algorithms handling concurrency and optimistic locking.",
         location="Remote",
-        employment_type="Full-time",
+        employment_type="Internship",
     )
     assert res_geo.relevant_projects == ["Smart Airport Ride Pooling (Fullstack Architecture)"]
     assert res_geo.score_breakdown["project_evidence"] == 6.0

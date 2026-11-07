@@ -56,15 +56,15 @@ class EligibilityFilter:
         is_phd_in_title = bool(re.search(r"\bph\.?d\b", title_lower))
         is_masters_in_title = bool(re.search(r"\b(?:master'?s|ms)\s+intern\b", title_lower))
 
-        # 1. PhD in Title handling
+        # 1. PhD in Title handling. The product deliberately excludes
+        # doctoral-targeted roles even when ATS details are incomplete.
         if is_phd_in_title:
             if not desc_available:
                 flags.append("Role title specifies PhD Intern, but job description is unavailable in ATS.")
                 return (
-                    EligibilityStatus.INSUFFICIENT_INFO,
+                    EligibilityStatus.INELIGIBLE,
                     [
-                        "Role title explicitly specifies PhD Intern, but detailed requirements are unavailable in ATS; "
-                        "cannot verify if PhD enrollment is mandatory or if undergraduate researchers are considered."
+                        "Role title explicitly targets PhD candidates; doctoral roles are outside the configured undergraduate/fresher scope."
                     ],
                     flags,
                 )
@@ -212,27 +212,39 @@ class EligibilityFilter:
                 reasons=["Position is Senior, Lead, Staff, or requires substantial (>4 yrs) experience."],
             )
 
-        # Check explicit experience requirements
-        range_match = re.search(r"(\d+)\s*(?:-|to)\s*(\d+)\s*years?", experience_level or "", re.IGNORECASE)
+        if (
+            self.profile.preferences.strict_fresher_only
+            and opportunity_type == OpportunityType.OTHER_UNKNOWN
+        ):
+            return EligibilityResult(
+                status=EligibilityStatus.INELIGIBLE,
+                reasons=[
+                    "Role is not explicitly identified as an internship, fresher, graduate, entry-level, or junior opportunity."
+                ],
+            )
+
+        # Check explicit experience requirements in metadata and description.
+        max_years = self.profile.preferences.max_required_experience_years
+        range_match = re.search(r"(\d+)\s*(?:-|to)\s*(\d+)\s*years?", full_text, re.IGNORECASE)
         if range_match:
             min_yrs = int(range_match.group(1))
-            if min_yrs > 4:
+            if min_yrs > max_years:
                 return EligibilityResult(
                     status=EligibilityStatus.INELIGIBLE,
-                    reasons=[f"Explicit experience requirement of {min_yrs}+ years exceeds early-career profile."],
+                    reasons=[f"Explicit minimum experience requirement of {min_yrs} years exceeds the configured fresher ceiling of {max_years}."],
                 )
-            elif min_yrs >= 2:
+            elif min_yrs == max_years:
                 flags.append(f"Position specifies {experience_level} experience; student applicant will need strong justification.")
         else:
-            exp_match = re.search(r"(\d+)\+?\s*years?", experience_level or "", re.IGNORECASE)
+            exp_match = re.search(r"(\d+)\+?\s*years?", full_text, re.IGNORECASE)
             if exp_match:
                 years = int(exp_match.group(1))
-                if years > 4:
+                if years > max_years:
                     return EligibilityResult(
                         status=EligibilityStatus.INELIGIBLE,
-                        reasons=[f"Explicit experience requirement of {years}+ years exceeds early-career profile."],
+                        reasons=[f"Explicit experience requirement of {years}+ years exceeds the configured fresher ceiling of {max_years}."],
                     )
-                elif years >= 2:
+                elif years == max_years:
                     flags.append(f"Position asks for {years}+ years experience; student applicant will need strong justification.")
 
         # 3. Location and Work Authorization Evaluation
@@ -313,6 +325,15 @@ class EligibilityFilter:
             )
 
         if opportunity_type == OpportunityType.REGULAR_FULL_TIME:
+            if self.profile.preferences.strict_fresher_only:
+                return EligibilityResult(
+                    status=EligibilityStatus.INELIGIBLE,
+                    reasons=[
+                        "Regular full-time role is not explicitly marked as internship, fresher, graduate, entry-level, or junior."
+                    ],
+                    flags=flags,
+                    work_auth_warning=work_auth_warning,
+                )
             reasons.append("Regular full-time position (not an internship).")
             return EligibilityResult(
                 status=EligibilityStatus.POTENTIALLY_ELIGIBLE,

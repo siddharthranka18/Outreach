@@ -75,6 +75,10 @@ class CandidatePreferences:
     work_arrangements: List[str] = field(default_factory=list)
     preferred_locations: List[str] = field(default_factory=list)
     exclude_seniority: List[str] = field(default_factory=list)
+    strict_fresher_only: bool = True
+    max_required_experience_years: int = 2
+    small_startup_max_employees: int = 200
+    allow_unknown_company_size: bool = False
 
 
 @dataclass
@@ -142,6 +146,16 @@ class CandidateProfile:
             work_arrangements=prefs_data.get("work_arrangements", []),
             preferred_locations=prefs_data.get("preferred_locations", []),
             exclude_seniority=prefs_data.get("exclude_seniority", []),
+            strict_fresher_only=prefs_data.get("strict_fresher_only", True),
+            max_required_experience_years=prefs_data.get(
+                "max_required_experience_years", 2
+            ),
+            small_startup_max_employees=prefs_data.get(
+                "small_startup_max_employees", 200
+            ),
+            allow_unknown_company_size=prefs_data.get(
+                "allow_unknown_company_size", False
+            ),
         )
 
         return cls(
