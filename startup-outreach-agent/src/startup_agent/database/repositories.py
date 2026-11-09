@@ -33,7 +33,7 @@ def _is_indirect_company_url(value: Optional[str]) -> bool:
         return False
     parsed = urlparse(value if "://" in value else f"https://{value}")
     host = parsed.netloc.lower().removeprefix("www.")
-    return host in INDIRECT_COMPANY_HOSTS
+    return host in INDIRECT_COMPANY_HOSTS or host.endswith(".recruitee.com")
 
 
 class CompanyRepository:
@@ -111,7 +111,13 @@ class CompanyRepository:
 
         existing = self.get_company_by_website(norm_website)
         if not existing and norm_name:
-            existing = self.get_company_by_normalized_name(norm_name)
+            candidate = self.get_company_by_normalized_name(norm_name)
+            if candidate and (
+                candidate.normalized_website.split("/", 1)[0] == norm_website.split("/", 1)[0]
+                or _is_indirect_company_url(company.website)
+                or _is_indirect_company_url(candidate.website)
+            ):
+                existing = candidate
 
         now = datetime.now(timezone.utc)
 

@@ -1,7 +1,8 @@
-"""Direct ATS job board discovery adapter (Greenhouse, Ashby, Lever)."""
+"""Direct discovery from public applicant tracking system job boards."""
 
 from datetime import datetime
 import logging
+import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
@@ -52,6 +53,10 @@ def extract_ats_target(
         else:
             board_token = path_parts[0]
 
+    if parsed.hostname and re.fullmatch(r"[a-z0-9-]+\.recruitee\.com", parsed.hostname):
+        platform = "recruitee"
+        board_token = parsed.hostname.split(".")[0]
+
     if not platform or not board_token:
         return None
 
@@ -67,7 +72,7 @@ def extract_ats_target(
 
 
 class DirectAtsDiscoverySource(BaseDiscoverySource):
-    """Discovers advertised roles using public REST endpoints of Greenhouse, Ashby, and Lever."""
+    """Discovers advertised roles using public careers APIs."""
 
     def __init__(
         self,
@@ -214,6 +219,35 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
             )
         return jobs
 
+    def _discover_recruitee(self, target: Dict[str, str]) -> List[Job]:
+        board = target["board_token"]
+        url = f"https://{board}.recruitee.com/api/offers"
+        jobs = []
+        for offer in self.http_client.get(url).json().get("offers", []):
+            title = offer.get("title")
+            job_url = offer.get("careers_url") or offer.get("careers_apply_url")
+            if not title or not job_url or offer.get("status") not in (None, "published"):
+                continue
+            description = " ".join(
+                BeautifulSoup(offer.get(field) or "", "html.parser").get_text(" ", strip=True)
+                for field in ("description", "requirements")
+            ).strip()
+            jobs.append(
+                Job(
+                    job_title=title,
+                    job_url=job_url,
+                    source_name=f"recruitee:{board}",
+                    company_name=target["company_name"],
+                    company_website=target["website"],
+                    location=offer.get("location"),
+                    description=description or None,
+                    employment_type=offer.get("employment_type_code"),
+                    source_job_id=str(offer["id"]) if offer.get("id") else None,
+                    status="open",
+                )
+            )
+        return jobs
+
     def discover(self) -> DiscoveryResult:
         """Run discovery across all configured ATS board endpoints."""
         if not self.is_enabled():
@@ -230,7 +264,9 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
             website = target.get("website", "")
             board_token = target.get("board_token", "")
 
-            if not company_name or not website or platform not in {"greenhouse", "ashby", "lever"}:
+            if not company_name or not website or platform not in {"greenhouse", "ashby", "lever", "recruitee"}:
+                continue
+            if platform == "recruitee" and not re.fullmatch(r"[a-z0-9-]+", board_token):
                 continue
 
             # Ensure company representation is included
@@ -254,6 +290,8 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
                     target_jobs = self._discover_ashby(target)
                 elif platform == "lever":
                     target_jobs = self._discover_lever(target)
+                elif platform == "recruitee":
+                    target_jobs = self._discover_recruitee(target)
                 else:
                     logger.warning("Unsupported ATS platform: %s", platform)
                     continue

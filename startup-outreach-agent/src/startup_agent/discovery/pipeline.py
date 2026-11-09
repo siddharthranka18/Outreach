@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 import logging
 import time
+import yaml
 from typing import Dict, List, Optional, Tuple, Type
 from sqlalchemy.orm import Session
 
@@ -13,6 +14,8 @@ from startup_agent.database.session import create_session_factory, session_scope
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
 from startup_agent.discovery.andhra_startup_map import AndhraStartupMapDiscoverySource
 from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
+from startup_agent.discovery.hasjob import HasjobDiscoverySource
+from startup_agent.discovery.himalayas import HimalayasDiscoverySource
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
 from startup_agent.discovery.wellfound import WellfoundDiscoverySource
 from startup_agent.discovery.y_combinator import YCombinatorDiscoverySource
@@ -30,6 +33,8 @@ logger = logging.getLogger("startup_agent.discovery.pipeline")
 # Registry of supported discovery adapter implementations
 SOURCE_ADAPTER_REGISTRY: Dict[str, Type[BaseDiscoverySource]] = {
     "andhra_startup_map": AndhraStartupMapDiscoverySource,
+    "hasjob": HasjobDiscoverySource,
+    "himalayas": HimalayasDiscoverySource,
     "y_combinator": YCombinatorDiscoverySource,
     "top_startups": TopStartupsDiscoverySource,
     "wellfound_india": WellfoundDiscoverySource,
@@ -83,6 +88,11 @@ class DiscoveryPipeline:
         self.custom_adapters = custom_adapters
         self.ats_http_client = ats_http_client
         self.auto_expand_ats = auto_expand_ats
+        evidence_path = self.settings.config_dir / "company_sizes.yaml"
+        self.size_evidence = (
+            yaml.safe_load(evidence_path.read_text(encoding="utf-8")) or {}
+            if evidence_path.exists() else {}
+        )
         self.startup_filter = StartupEligibilityFilter(
             max_employees=max_startup_employees,
             allow_unknown=False,
@@ -98,7 +108,14 @@ class DiscoveryPipeline:
             if not src.enabled:
                 continue
             adapter_cls = SOURCE_ADAPTER_REGISTRY.get(src.name)
-            if adapter_cls:
+            if adapter_cls is HimalayasDiscoverySource:
+                employers = {
+                    evidence["himalayas_slug"]: (domain, evidence)
+                    for domain, evidence in self.size_evidence.items()
+                    if evidence.get("himalayas_slug")
+                }
+                adapters.append(HimalayasDiscoverySource(employers, name=src.name))
+            elif adapter_cls:
                 adapters.append(adapter_cls(name=src.name, enabled=True))
             else:
                 logger.warning("No registered discovery adapter for source: '%s'", src.name)
@@ -150,8 +167,8 @@ class DiscoveryPipeline:
         summary.jobs_discovered = len(collected_jobs)
 
         # 2. Expand public ATS boards exposed by confirmed small-startup job URLs.
+        self._hydrate_known_company_sizes(collected_companies)
         if self.auto_expand_ats:
-            self._hydrate_known_company_sizes(collected_companies)
             ats_result, board_count = self._expand_discovered_ats_boards(
                 collected_companies, collected_jobs
             )
@@ -194,7 +211,17 @@ class DiscoveryPipeline:
         def hydrate(session: Session) -> None:
             repository = CompanyRepository(session)
             for company in unknown_companies:
-                existing = repository.get_company_by_normalized_name(company.company_name)
+                domain = company.normalized_website.split("/", 1)[0]
+                evidence = self.size_evidence.get(domain)
+                if evidence:
+                    company.employee_count = evidence["employee_count"]
+                    continue
+                existing = repository.get_company_by_website(company.website)
+                if not existing and domain in {
+                    "jobs.lever.co", "jobs.ashbyhq.com", "boards.greenhouse.io",
+                    "job-boards.greenhouse.io",
+                }:
+                    existing = repository.get_company_by_normalized_name(company.company_name)
                 if existing and existing.employee_count:
                     company.employee_count = existing.employee_count
                     logger.debug(
@@ -292,6 +319,7 @@ class DiscoveryPipeline:
                     summary.companies_updated += 1
 
                 company_id_by_website[model.normalized_website] = model.id
+                company_id_by_website[company.normalized_website] = model.id
                 company_id_by_name[model.normalized_name] = model.id
             except Exception as exc:
                 logger.error("Failed to upsert company '%s': %s", company.company_name, exc)
@@ -311,7 +339,7 @@ class DiscoveryPipeline:
                                 if existing_co:
                                     target_id = existing_co.id
 
-                        if not target_id and job.company_name:
+                        if not target_id and not job.company_website and job.company_name:
                             norm_name = normalize_name(job.company_name)
                             target_id = company_id_by_name.get(norm_name)
                             if not target_id:

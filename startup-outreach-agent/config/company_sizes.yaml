@@ -1,0 +1,10 @@
+# Publicly reported employee bands, keyed by the employer's official domain.
+nestack.com:
+  employee_count: "11-50"
+  source_url: https://in.linkedin.com/company/nestack-technologies
+  checked_on: 2026-11-09
+diligencevault.com:
+  employee_count: "51-200"
+  source_url: https://himalayas.app/companies/diligencevault/jobs
+  checked_on: 2026-11-09
+  himalayas_slug: diligencevault

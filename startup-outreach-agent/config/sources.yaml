@@ -1,5 +1,18 @@
 version: "1.0"
 sources:
+  - name: "himalayas"
+    display_name: "Himalayas"
+    type: "public_jobs_api"
+    enabled: true
+    description: "Remote technical internships open to India from employers with reviewed domains."
+
+  - name: "hasjob"
+    display_name: "Hasjob"
+    type: "atom_feed"
+    url: "https://hasjob.co/feed"
+    enabled: true
+    description: "Technical early-career roles from the official Hasjob feed."
+
   - name: "andhra_startup_map"
     display_name: "Andhra Startup Map Fresher Jobs"
     type: "verified_fresher_board"
