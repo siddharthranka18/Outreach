@@ -275,7 +275,10 @@ class JobClassifier:
                 return JobCategory.FULL_STACK
             return JobCategory.SOFTWARE_DEV
 
-        if any(kw in title_lower for kw in ["ai", "ml", "machine learning", "deep learning", "nlp", "computer vision", "llm"]):
+        if re.search(
+            r"\b(?:ai|ml|nlp|llm)\b|\b(?:machine learning|deep learning|computer vision)\b",
+            title_lower,
+        ):
             return JobCategory.AI_ML
 
         if any(kw in title_lower for kw in ["backend", "back-end", "back end", "server", "distributed system"]):

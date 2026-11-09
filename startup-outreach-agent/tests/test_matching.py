@@ -52,6 +52,7 @@ def test_job_classification() -> None:
     assert classifier.classify("Robotics Intern") == JobCategory.SOFTWARE_DEV_INTERN
     assert classifier.classify("Electrical Engineering Intern") == JobCategory.UNRELATED
     assert classifier.classify("Mechanical Engineering Placement, New Grad") == JobCategory.UNRELATED
+    assert classifier.classify("Trainee Software Engineer") == JobCategory.SOFTWARE_DEV_INTERN
     assert classifier.classify("Finance Operations Lead") == JobCategory.UNRELATED
     assert classifier.classify("Demand Generation Manager") == JobCategory.UNRELATED
     assert classifier.classify("Product Marketing Manager") == JobCategory.UNRELATED

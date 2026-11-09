@@ -9,6 +9,7 @@ from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
 from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
 from startup_agent.discovery.pipeline import DiscoveryPipeline
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
+from startup_agent.discovery.wellfound import WellfoundDiscoverySource
 from startup_agent.discovery.y_combinator import YCombinatorDiscoverySource
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
@@ -80,6 +81,61 @@ MOCK_ASHBY_JSON = {
         }
     ]
 }
+
+MOCK_WELLFOUND_HTML = """
+<html><body>
+<div class="mb-6 w-full rounded border bg-white">
+  <div data-testid="startup-header">
+    <a href="/company/tiny-india"><h2>Tiny India</h2></a>
+    <span>11-50 Employees</span>
+  </div>
+  <div class="min-h-[50px] items-end">
+    <a href="/jobs/123-backend-engineer-intern">Backend Engineer Intern</a>
+    <span>Internship</span><span>Remote only • India</span><span>0 years of exp</span>
+  </div>
+  <div class="min-h-[50px] items-end">
+    <a href="/jobs/456-senior-engineer">Senior Engineer</a>
+    <span>Full-time</span><span>Remote only • India</span><span>7 years of exp</span>
+  </div>
+</div>
+<div class="mb-6 w-full rounded border bg-white">
+  <div data-testid="startup-header">
+    <a href="/company/large-corp"><h2>Large Corp</h2></a>
+    <span>201-500 Employees</span>
+  </div>
+  <div class="min-h-[50px] items-end">
+    <a href="/jobs/789-software-intern">Software Intern</a>
+    <span>Internship</span><span>India</span>
+  </div>
+</div>
+</body></html>
+"""
+
+MOCK_WELLFOUND_JOB_HTML = """
+<html><body>
+<script type="application/ld+json">
+{
+  "@context": "http://schema.org/",
+  "@type": "JobPosting",
+  "title": "Backend Engineer Intern",
+  "employmentType": "FULL_TIME",
+  "hiringOrganization": {
+    "@type": "Organization",
+    "name": "Tiny India",
+    "sameAs": "https://tiny.example"
+  },
+  "description": "<p>Build Python FastAPI services using PostgreSQL and Docker.</p>",
+  "datePosted": "2026-11-05T09:43:19Z",
+  "jobLocationType": "TELECOMMUTE",
+  "applicantLocationRequirements": [{"@type": "Country", "name": "India"}],
+  "experienceRequirements": {
+    "@type": "OccupationalExperienceRequirements",
+    "monthsOfExperience": 0
+  }
+}
+</script>
+</body></html>
+"""
 
 
 def test_yc_adapter_parsing() -> None:
@@ -195,6 +251,52 @@ def test_top_startups_adapter_parsing() -> None:
     assert job.job_title == "Machine Learning Intern"
     assert job.job_url == "https://jobs.ashbyhq.com/synthetica/12345"
     assert "Remote" in str(job.location)
+
+
+def test_wellfound_adapter_filters_for_small_early_career_startups() -> None:
+    """Wellfound contributes only size-verified early-career startup listings."""
+    mock_client = MagicMock(spec=HttpClient)
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.text = MOCK_WELLFOUND_HTML
+    detail_response = MagicMock(spec=httpx.Response)
+    detail_response.text = MOCK_WELLFOUND_JOB_HTML
+    mock_client.get.side_effect = [mock_response, detail_response]
+
+    result = WellfoundDiscoverySource(
+        http_client=mock_client,
+        max_pages=1,
+    ).discover()
+
+    assert len(result.companies) == 1
+    assert result.companies[0].company_name == "Tiny India"
+    assert result.companies[0].employee_count == "11-50"
+    assert result.companies[0].website == "https://tiny.example"
+    assert len(result.jobs) == 1
+    job = result.jobs[0]
+    assert job.job_title == "Backend Engineer Intern"
+    assert job.job_url == "https://wellfound.com/jobs/123-backend-engineer-intern"
+    assert job.location == "Remote / India"
+    assert job.experience_level == "0 years of exp"
+    assert "FastAPI" in str(job.description)
+    assert job.company_website == "https://tiny.example"
+    assert job.source_job_id == "123"
+
+
+def test_wellfound_location_parser_ignores_remote_in_job_title() -> None:
+    """A title containing Remote does not get mixed into location metadata."""
+    mock_client = MagicMock(spec=HttpClient)
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.text = MOCK_WELLFOUND_HTML.replace(
+        "Backend Engineer Intern",
+        "Remote Backend Engineer Intern",
+    )
+    detail_response = MagicMock(spec=httpx.Response)
+    detail_response.text = "<html></html>"
+    mock_client.get.side_effect = [mock_response, detail_response]
+
+    result = WellfoundDiscoverySource(http_client=mock_client, max_pages=1).discover()
+
+    assert result.jobs[0].location == "Remote only • India"
 
 
 def test_direct_ats_adapter_parsing() -> None:

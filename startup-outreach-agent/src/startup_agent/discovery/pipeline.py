@@ -13,6 +13,7 @@ from startup_agent.database.session import create_session_factory, session_scope
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
 from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
+from startup_agent.discovery.wellfound import WellfoundDiscoverySource
 from startup_agent.discovery.y_combinator import YCombinatorDiscoverySource
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
@@ -29,6 +30,7 @@ logger = logging.getLogger("startup_agent.discovery.pipeline")
 SOURCE_ADAPTER_REGISTRY: Dict[str, Type[BaseDiscoverySource]] = {
     "y_combinator": YCombinatorDiscoverySource,
     "top_startups": TopStartupsDiscoverySource,
+    "wellfound_india": WellfoundDiscoverySource,
     "company_career_sites": DirectAtsDiscoverySource,
     "direct_ats": DirectAtsDiscoverySource,
 }
@@ -252,7 +254,8 @@ class DiscoveryPipeline:
         # 1. Upsert Companies
         for company in companies:
             try:
-                model, is_new = company_repo.upsert_company_with_status(company)
+                with session.begin_nested():
+                    model, is_new = company_repo.upsert_company_with_status(company)
                 if is_new:
                     summary.companies_inserted += 1
                 else:
@@ -266,35 +269,36 @@ class DiscoveryPipeline:
         # 2. Resolve Company IDs and Upsert Jobs
         for job in jobs:
             try:
-                # Link company_id if not already established
-                if job.company_id is None:
-                    target_id = None
-                    if job.company_website:
-                        norm_site = normalize_website(job.company_website)
-                        target_id = company_id_by_website.get(norm_site)
-                        if not target_id:
-                            existing_co = company_repo.get_company_by_website(norm_site)
-                            if existing_co:
-                                target_id = existing_co.id
+                with session.begin_nested():
+                    # Link company_id if not already established
+                    if job.company_id is None:
+                        target_id = None
+                        if job.company_website:
+                            norm_site = normalize_website(job.company_website)
+                            target_id = company_id_by_website.get(norm_site)
+                            if not target_id:
+                                existing_co = company_repo.get_company_by_website(norm_site)
+                                if existing_co:
+                                    target_id = existing_co.id
 
-                    if not target_id and job.company_name:
-                        norm_name = normalize_name(job.company_name)
-                        target_id = company_id_by_name.get(norm_name)
-                        if not target_id:
-                            existing_co = company_repo.get_company_by_normalized_name(norm_name)
-                            if existing_co:
-                                target_id = existing_co.id
+                        if not target_id and job.company_name:
+                            norm_name = normalize_name(job.company_name)
+                            target_id = company_id_by_name.get(norm_name)
+                            if not target_id:
+                                existing_co = company_repo.get_company_by_normalized_name(norm_name)
+                                if existing_co:
+                                    target_id = existing_co.id
 
-                    if target_id is None:
-                        logger.warning(
-                            "Could not resolve company for job '%s' (%s). Skipping job.",
-                            job.job_title,
-                            job.company_name or job.company_website,
-                        )
-                        continue
-                    job.company_id = target_id
+                        if target_id is None:
+                            logger.warning(
+                                "Could not resolve company for job '%s' (%s). Skipping job.",
+                                job.job_title,
+                                job.company_name or job.company_website,
+                            )
+                            continue
+                        job.company_id = target_id
 
-                model, is_new = job_repo.upsert_job_with_status(job)
+                    model, is_new = job_repo.upsert_job_with_status(job)
                 if is_new:
                     summary.jobs_inserted += 1
                 else:

@@ -14,6 +14,13 @@ sources:
     enabled: true
     description: "Curated startup database filtered for early-stage and funded companies."
 
+  - name: "wellfound_india"
+    display_name: "Wellfound India"
+    type: "startup_job_board"
+    url: "https://wellfound.com/location/india"
+    enabled: true
+    description: "Public India startup listings with company-size and experience metadata."
+
   - name: "company_career_sites"
     display_name: "Direct Career Pages & ATS"
     type: "direct_ats"
