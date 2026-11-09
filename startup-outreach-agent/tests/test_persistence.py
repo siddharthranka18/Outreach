@@ -150,6 +150,36 @@ def test_company_upsert_preserves_non_null_values(company_repo: CompanyRepositor
     assert updated.industry == "Quantum Software"
 
 
+def test_company_upsert_does_not_replace_official_site_with_ats(
+    company_repo: CompanyRepository,
+) -> None:
+    """A secondary job source may add careers data without degrading identity."""
+    company_repo.create_company(
+        Company(
+            company_name="Weekday",
+            website="https://weekday.works",
+            source_name="yc",
+            source_url="https://example.com/weekday",
+            employee_count="38",
+        )
+    )
+
+    updated = company_repo.upsert_company(
+        Company(
+            company_name="Weekday",
+            website="https://jobs.lever.co/weekdayworks",
+            source_name="andhra_startup_map",
+            source_url="https://www.andhrastartupmap.in/jobs",
+            careers_url="https://jobs.lever.co/weekdayworks",
+        )
+    )
+
+    assert updated.website == "https://weekday.works"
+    assert updated.normalized_website == "weekday.works"
+    assert updated.employee_count == "38"
+    assert updated.careers_url == "https://jobs.lever.co/weekdayworks"
+
+
 def test_job_upsert_deduplication(
     company_repo: CompanyRepository,
     job_repo: JobRepository,

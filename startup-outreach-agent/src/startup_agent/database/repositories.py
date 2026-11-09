@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple, Union
+from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from startup_agent.database.models import CompanyModel, JobModel
@@ -12,6 +13,27 @@ from startup_agent.utils.normalizers import (
     normalize_name,
     normalize_website,
 )
+
+
+INDIRECT_COMPANY_HOSTS = {
+    "jobs.ashbyhq.com",
+    "jobs.lever.co",
+    "boards.greenhouse.io",
+    "job-boards.greenhouse.io",
+    "jobs.smartrecruiters.com",
+    "wellfound.com",
+    "remotive.com",
+    "andhrastartupmap.in",
+}
+
+
+def _is_indirect_company_url(value: Optional[str]) -> bool:
+    """Return whether a URL is an aggregator/profile/ATS rather than a company site."""
+    if not value:
+        return False
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    host = parsed.netloc.lower().removeprefix("www.")
+    return host in INDIRECT_COMPANY_HOSTS
 
 
 class CompanyRepository:
@@ -107,6 +129,12 @@ class CompanyRepository:
             for attr in fields_to_check:
                 incoming_val = getattr(company, attr, None)
                 if incoming_val is not None and str(incoming_val).strip() != "":
+                    if (
+                        attr == "website"
+                        and not _is_indirect_company_url(existing.website)
+                        and _is_indirect_company_url(str(incoming_val))
+                    ):
+                        continue
                     setattr(existing, attr, incoming_val)
 
             existing.normalized_name = normalize_name(existing.company_name)

@@ -11,6 +11,7 @@ from startup_agent.database.engine import create_db_engine
 from startup_agent.database.repositories import CompanyRepository, JobRepository
 from startup_agent.database.session import create_session_factory, session_scope
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
+from startup_agent.discovery.andhra_startup_map import AndhraStartupMapDiscoverySource
 from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
 from startup_agent.discovery.wellfound import WellfoundDiscoverySource
@@ -28,6 +29,7 @@ logger = logging.getLogger("startup_agent.discovery.pipeline")
 
 # Registry of supported discovery adapter implementations
 SOURCE_ADAPTER_REGISTRY: Dict[str, Type[BaseDiscoverySource]] = {
+    "andhra_startup_map": AndhraStartupMapDiscoverySource,
     "y_combinator": YCombinatorDiscoverySource,
     "top_startups": TopStartupsDiscoverySource,
     "wellfound_india": WellfoundDiscoverySource,
@@ -149,6 +151,7 @@ class DiscoveryPipeline:
 
         # 2. Expand public ATS boards exposed by confirmed small-startup job URLs.
         if self.auto_expand_ats:
+            self._hydrate_known_company_sizes(collected_companies)
             ats_result, board_count = self._expand_discovered_ats_boards(
                 collected_companies, collected_jobs
             )
@@ -181,6 +184,33 @@ class DiscoveryPipeline:
             summary.jobs_updated,
         )
         return summary
+
+    def _hydrate_known_company_sizes(self, companies: List[Company]) -> None:
+        """Reuse a size verified by an earlier source before ATS expansion."""
+        unknown_companies = [company for company in companies if not company.employee_count]
+        if not unknown_companies:
+            return
+
+        def hydrate(session: Session) -> None:
+            repository = CompanyRepository(session)
+            for company in unknown_companies:
+                existing = repository.get_company_by_normalized_name(company.company_name)
+                if existing and existing.employee_count:
+                    company.employee_count = existing.employee_count
+                    logger.debug(
+                        "Reused verified company size '%s' for '%s'.",
+                        existing.employee_count,
+                        company.company_name,
+                    )
+
+        if self.session is not None:
+            hydrate(self.session)
+            return
+
+        engine = create_db_engine(self.settings.database_url)
+        session_factory = create_session_factory(engine)
+        with session_factory() as lookup_session:
+            hydrate(lookup_session)
 
     def _expand_discovered_ats_boards(
         self,

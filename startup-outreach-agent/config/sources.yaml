@@ -1,5 +1,12 @@
 version: "1.0"
 sources:
+  - name: "andhra_startup_map"
+    display_name: "Andhra Startup Map Fresher Jobs"
+    type: "verified_fresher_board"
+    url: "https://www.andhrastartupmap.in/jobs"
+    enabled: true
+    description: "Employer-verified India fresher and internship roles with direct application links."
+
   - name: "y_combinator"
     display_name: "Y Combinator"
     type: "directory"

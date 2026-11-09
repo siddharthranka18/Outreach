@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
+from startup_agent.discovery.andhra_startup_map import AndhraStartupMapDiscoverySource
 from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
 from startup_agent.discovery.pipeline import DiscoveryPipeline
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
@@ -134,6 +135,29 @@ MOCK_WELLFOUND_JOB_HTML = """
   }
 }
 </script>
+</body></html>
+"""
+
+MOCK_ANDHRA_STARTUP_MAP_HTML = """
+<html><body>
+<div class="flex flex-col justify-between rounded-2xl border">
+  <div>
+    <div><img alt="Tiny AI" src="https://www.google.com/s2/favicons?domain=tiny.ai&amp;sz=64"/>
+      <span class="font-bold">Tiny AI</span><span>Internship</span>
+    </div>
+    <h3><a href="/jobs/role/role-123">Backend Software Engineer Intern</a></h3>
+    <div class="mt-2 text-xs"><span>Remote in India</span></div>
+    <span>Engineering &amp; AI</span>
+  </div>
+  <a href="https://jobs.lever.co/tiny-ai/abc-123">Apply on Portal</a>
+</div>
+<div class="flex flex-col justify-between rounded-2xl border">
+  <div><img alt="Hardware Co" src="https://www.google.com/s2/favicons?domain=hardware.example&amp;sz=64"/>
+    <span class="font-bold">Hardware Co</span><span>Internship</span>
+    <h3><a href="/jobs/role/role-456">Mechanical Engineer Intern</a></h3>
+  </div>
+  <a href="https://example.com/mechanical">Apply on Portal</a>
+</div>
 </body></html>
 """
 
@@ -299,6 +323,43 @@ def test_wellfound_location_parser_ignores_remote_in_job_title() -> None:
     assert result.jobs[0].location == "Remote only • India"
 
 
+def test_andhra_startup_map_parses_verified_technical_roles() -> None:
+    """The niche India board contributes direct links but excludes unrelated roles."""
+    mock_client = MagicMock(spec=HttpClient)
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.text = MOCK_ANDHRA_STARTUP_MAP_HTML
+    mock_client.get.return_value = mock_response
+
+    result = AndhraStartupMapDiscoverySource(http_client=mock_client).discover()
+
+    assert len(result.companies) == 1
+    assert result.companies[0].company_name == "Tiny AI"
+    assert result.companies[0].website == "https://tiny.ai"
+    assert result.companies[0].employee_count is None
+    assert len(result.jobs) == 1
+    job = result.jobs[0]
+    assert job.job_title == "Backend Software Engineer Intern"
+    assert job.job_url == "https://jobs.lever.co/tiny-ai/abc-123"
+    assert job.location == "Remote in India"
+    assert job.source_job_id == "role-123"
+
+
+def test_andhra_startup_map_keeps_company_specific_ats_board() -> None:
+    """Generic ATS hosts do not collapse multiple employers into one company."""
+    html = MOCK_ANDHRA_STARTUP_MAP_HTML.replace(
+        "domain=tiny.ai",
+        "domain=jobs.lever.co",
+    )
+    mock_client = MagicMock(spec=HttpClient)
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.text = html
+    mock_client.get.return_value = mock_response
+
+    result = AndhraStartupMapDiscoverySource(http_client=mock_client).discover()
+
+    assert result.companies[0].website == "https://jobs.lever.co/tiny-ai"
+
+
 def test_direct_ats_adapter_parsing() -> None:
     """Test that DirectAtsDiscoverySource extracts jobs via Ashby endpoint."""
     mock_client = MagicMock(spec=HttpClient)
@@ -394,6 +455,59 @@ def test_pipeline_auto_expands_small_startup_ats_board(db_session: Session) -> N
     assert summary.jobs_inserted == 2
     requested_url = mock_client.get.call_args.args[0]
     assert requested_url.endswith("/synthetica")
+
+
+def test_pipeline_reuses_existing_company_size_for_ats_expansion(
+    db_session: Session,
+) -> None:
+    """A niche board can inherit size evidence collected by an earlier source."""
+    from startup_agent.database.repositories import CompanyRepository
+
+    CompanyRepository(db_session).create_company(
+        Company(
+            company_name="Weekday",
+            website="https://weekday.works",
+            source_name="yc",
+            source_url="https://example.com/weekday",
+            employee_count="38",
+        )
+    )
+
+    class NicheBoardAdapter(BaseDiscoverySource):
+        def discover(self) -> DiscoveryResult:
+            return DiscoveryResult(
+                companies=[
+                    Company(
+                        company_name="Weekday",
+                        website="https://jobs.lever.co/weekdayworks",
+                        source_name="niche_board",
+                        source_url="https://niche.example",
+                    )
+                ],
+                jobs=[
+                    Job(
+                        job_title="Software Engineer Intern",
+                        job_url="https://jobs.lever.co/weekdayworks/job-123",
+                        source_name="niche_board",
+                        company_name="Weekday",
+                        company_website="https://jobs.lever.co/weekdayworks",
+                    )
+                ],
+            )
+
+    mock_client = MagicMock(spec=HttpClient)
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.json.return_value = []
+    mock_client.get.return_value = mock_response
+
+    summary = DiscoveryPipeline(
+        session=db_session,
+        custom_adapters=[NicheBoardAdapter(name="niche")],
+        ats_http_client=mock_client,
+    ).run()
+
+    assert summary.ats_boards_expanded == 1
+    assert "/weekdayworks?" in mock_client.get.call_args.args[0]
 
 
 def test_pipeline_does_not_expand_large_company_board(db_session: Session) -> None:
