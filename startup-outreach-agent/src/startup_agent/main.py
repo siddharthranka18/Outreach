@@ -6,11 +6,14 @@ from typing import List, Optional
 from sqlalchemy import text
 from startup_agent.config.settings import Settings
 from startup_agent.database.engine import create_db_engine
+from startup_agent.database.session import create_session_factory
+from startup_agent.digest import format_digest
 from startup_agent.discovery.pipeline import DiscoverySummary, run_discovery_pipeline
 from startup_agent.matching.eligibility import EligibilityStatus
 from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.ranker import OpportunityRanker
 from startup_agent.matching.scorer import MatchResult
+from startup_agent.routing import build_outreach_routes
 from startup_agent.utils.logging_config import setup_logging
 
 
@@ -157,6 +160,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Classify, filter, score, and rank stored jobs against candidate profile.",
     )
+    parser.add_argument(
+        "--outreach",
+        action="store_true",
+        help="Preview deduplicated apply links, published hiring inboxes, and watchlist companies.",
+    )
+    parser.add_argument(
+        "--digest-preview",
+        action="store_true",
+        help="Print the Telegram-format shortlist locally.",
+    )
 
     cli_args = argv if argv is not None else []
     args = parser.parse_args(cli_args)
@@ -182,6 +195,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             print_matching_report(ranked_results, profile)
             return 0
 
+        if args.outreach or args.digest_preview:
+            session_factory = create_session_factory(create_db_engine(settings.database_url))
+            with session_factory() as session:
+                routes = build_outreach_routes(session, settings)
+            if args.digest_preview:
+                print(format_digest(routes))
+                return 0
+            for route in routes:
+                label = f"{route.title} @ {route.company}" if route.title else route.company
+                print(f"[{route.action}] {label}")
+                if route.url:
+                    print(f"  Link: {route.url}")
+                if route.contact:
+                    print(f"  Published in job text (delivery unverified): {route.contact}")
+            print(f"\n{sum(bool(route.title) for route in routes)} opportunity routes, "
+                  f"{sum(not route.title for route in routes)} watchlist companies.")
+            return 0
+
         # Default mode: diagnostic status report
         print("\n" + "=" * 60)
         print("   STARTUP JOB OUTREACH AGENT - FOUNDATION & DB READY")
@@ -197,7 +228,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("=" * 60)
         print("Commands:")
         print("  python run.py --discover : Execute live discovery pipeline")
-        print("  python run.py --match    : Score and rank stored opportunities\n")
+        print("  python run.py --match    : Score and rank stored opportunities")
+        print("  python run.py --outreach : Preview outreach routes")
+        print("  python run.py --digest-preview : Preview the Telegram shortlist\n")
         return 0
 
     except Exception as exc:
