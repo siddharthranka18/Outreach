@@ -14,6 +14,7 @@ from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.ranker import OpportunityRanker
 from startup_agent.matching.scorer import MatchResult
 from startup_agent.routing import build_outreach_routes
+from startup_agent.telegram import private_chat_ids, send_test_digest
 from startup_agent.utils.logging_config import setup_logging
 
 
@@ -170,12 +171,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Print the Telegram-format shortlist locally.",
     )
+    parser.add_argument("--telegram-chat-id", action="store_true", help="List recent private chat IDs.")
+    parser.add_argument("--telegram-test", action="store_true", help="Send a one-time Telegram digest.")
 
     cli_args = argv if argv is not None else []
     args = parser.parse_args(cli_args)
 
     try:
         settings = initialize_app()
+
+        if args.telegram_chat_id:
+            chat_ids = private_chat_ids()
+            if not chat_ids:
+                print("No recent private chats. Send /start to your bot and try again.")
+                return 1
+            for chat_id in chat_ids:
+                print(f"Private chat ID: {chat_id}")
+            return 0
 
         if args.discover:
             print("\n>>> Launching multi-source discovery pipeline...")
@@ -195,10 +207,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             print_matching_report(ranked_results, profile)
             return 0
 
-        if args.outreach or args.digest_preview:
+        if args.outreach or args.digest_preview or args.telegram_test:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
             with session_factory() as session:
                 routes = build_outreach_routes(session, settings)
+            if args.telegram_test:
+                count = send_test_digest(format_digest(routes))
+                print(f"Telegram confirmed {count} test message(s).")
+                return 0
             if args.digest_preview:
                 print(format_digest(routes))
                 return 0
