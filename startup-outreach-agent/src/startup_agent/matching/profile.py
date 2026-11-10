@@ -40,6 +40,7 @@ class CandidateProject:
     title: str
     description: str
     technologies: List[str] = field(default_factory=list)
+    outreach_roles: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -136,6 +137,7 @@ class CandidateProfile:
                 title=p.get("title", ""),
                 description=p.get("description", ""),
                 technologies=p.get("technologies", []),
+                outreach_roles=p.get("outreach_roles", []),
             )
             for p in cand.get("projects", [])
         ]

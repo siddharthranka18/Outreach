@@ -67,14 +67,25 @@ candidate:
 
   projects:
     - title: "SehatSaathi"
+      outreach_roles: ["ai"]
       description: "Voice-enabled AI medical triage assistant using FastAPI, React, Groq LLaMA 3.3, and Hybrid RAG (Qdrant, BM25, RRF, CrossEncoder reranking)."
       technologies: ["FastAPI", "React", "Groq LLaMA", "RAG", "Qdrant", "Docker", "Python"]
     - title: "Smart Airport Ride Pooling Backend"
+      outreach_roles: ["backend"]
       description: "Ride pooling backend using Node.js, Express.js, MongoDB 2dsphere geospatial indexing, sub-300ms matching, optimistic locking."
       technologies: ["Node.js", "Express.js", "MongoDB", "Geospatial Indexing", "REST APIs", "JavaScript"]
     - title: "Notification Engine"
+      outreach_roles: ["backend"]
       description: "Asynchronous notification engine using BullMQ, Redis, MongoDB, queue-worker architecture, and Socket.IO real-time tracking."
       technologies: ["BullMQ", "Redis", "MongoDB", "Queue Architecture", "Socket.IO", "Node.js"]
+    - title: "KarigarFlow"
+      outreach_roles: ["full_stack"]
+      description: "I built it as a company assignment for workshop inventory and reconciliation using React, TypeScript, FastAPI, and PostgreSQL."
+      technologies: ["React", "TypeScript", "FastAPI", "PostgreSQL"]
+    - title: "crossTune"
+      outreach_roles: ["mobile"]
+      description: "I built the Android music app in Java, with Firebase authentication and real-time listening sessions using Socket.IO."
+      technologies: ["Android", "Java", "Firebase", "MySQL", "Socket.IO"]
     - title: "AI Shopping Assistant"
       description: "Conversational shopping assistant using Python, LangChain, Groq LLMs, Streamlit, SQLite, and vision tool-calling."
       technologies: ["Python", "LangChain", "Groq LLMs", "Streamlit", "SQLite"]

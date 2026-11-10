@@ -32,6 +32,10 @@ class OutreachRoute:
     location: str | None = None
     match_score: float | None = None
     job_id: int | None = None
+    relevant_projects: tuple[str, ...] = ()
+    matching_skills: tuple[str, ...] = ()
+    category: str = ""
+    asks_for_internship: bool = False
 
 
 def _public_link(value: str | None) -> str | None:
@@ -78,6 +82,14 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
             action="Review email candidate" if contact else "Apply link",
             location=match.location, match_score=match.match_score,
             job_id=job.id,
+            relevant_projects=tuple(match.relevant_projects),
+            matching_skills=tuple(match.matching_skills),
+            category=match.category,
+            asks_for_internship=bool(re.search(
+                r"\b(?:prior|previous|completed)\b[^.!?\n]{0,50}\binternship\b"
+                r"|\binternship experience\b",
+                job.description or "", re.IGNORECASE,
+            )),
         ))
 
     for company in session.scalars(select(CompanyModel).order_by(CompanyModel.company_name)):

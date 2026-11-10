@@ -8,6 +8,7 @@ from startup_agent.config.settings import Settings
 from startup_agent.database.engine import create_db_engine
 from startup_agent.database.session import create_session_factory
 from startup_agent.digest import format_digest
+from startup_agent.email_drafts import format_email_draft, generate_llm_email_draft
 from startup_agent.discovery.pipeline import DiscoverySummary, run_discovery_pipeline
 from startup_agent.matching.eligibility import EligibilityStatus
 from startup_agent.matching.profile import CandidateProfile
@@ -174,6 +175,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--telegram-chat-id", action="store_true", help="List recent private chat IDs.")
     parser.add_argument("--telegram-test", action="store_true", help="Send a one-time Telegram digest.")
     parser.add_argument("--telegram-review", action="store_true", help="Send job cards with review buttons.")
+    parser.add_argument("--email-preview", action="store_true", help="Preview a local outreach email draft.")
+    parser.add_argument("--email-llm-preview", action="store_true", help="Preview an outreach draft written by Gemini.")
     parser.add_argument("--telegram-poll", action="store_true", help="Listen for Telegram job actions.")
 
     cli_args = argv if argv is not None else []
@@ -218,10 +221,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             print_matching_report(ranked_results, profile)
             return 0
 
-        if args.outreach or args.digest_preview or args.telegram_test or args.telegram_review:
+        if args.outreach or args.digest_preview or args.telegram_test or args.telegram_review or args.email_preview or args.email_llm_preview:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
             with session_factory() as session:
                 routes = build_outreach_routes(session, settings)
+            if args.email_preview or args.email_llm_preview:
+                openings = [route for route in routes if route.job_id is not None]
+                if not openings:
+                    print("No eligible openings to draft for.")
+                    return 0
+                route = next((route for route in openings if route.contact), openings[0])
+                profile = CandidateProfile.load(settings.config_dir / "candidate_profile.yaml")
+                if args.email_llm_preview:
+                    print("LLM email draft preview\n")
+                    print(generate_llm_email_draft(route, profile))
+                    return 0
+                print("Local email draft preview\n")
+                print(format_email_draft(route, profile))
+                return 0
             if args.telegram_review:
                 count = send_job_cards(routes)
                 print(f"Telegram confirmed {count} review card(s).")
