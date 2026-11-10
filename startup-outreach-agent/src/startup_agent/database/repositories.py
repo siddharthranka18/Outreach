@@ -301,7 +301,8 @@ class JobRepository:
 
             existing.last_seen_at = now
             existing.updated_at = now
-            existing.status = getattr(job, "status", "open") or "open"
+            if existing.status not in {"skipped", "applied"}:
+                existing.status = getattr(job, "status", "open") or "open"
             self.session.flush()
             return existing, False
 

@@ -14,7 +14,7 @@ from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.ranker import OpportunityRanker
 from startup_agent.matching.scorer import MatchResult
 from startup_agent.routing import build_outreach_routes
-from startup_agent.telegram import private_chat_ids, send_test_digest
+from startup_agent.telegram import poll_job_actions, private_chat_ids, send_job_cards, send_test_digest
 from startup_agent.utils.logging_config import setup_logging
 
 
@@ -173,12 +173,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--telegram-chat-id", action="store_true", help="List recent private chat IDs.")
     parser.add_argument("--telegram-test", action="store_true", help="Send a one-time Telegram digest.")
+    parser.add_argument("--telegram-review", action="store_true", help="Send job cards with review buttons.")
+    parser.add_argument("--telegram-poll", action="store_true", help="Listen for Telegram job actions.")
 
     cli_args = argv if argv is not None else []
     args = parser.parse_args(cli_args)
 
     try:
         settings = initialize_app()
+
+        if args.telegram_poll:
+            session_factory = create_session_factory(create_db_engine(settings.database_url))
+            print("Listening for Telegram job actions. Press Ctrl+C to stop.", flush=True)
+            try:
+                poll_job_actions(session_factory)
+            except KeyboardInterrupt:
+                print("\nStopped Telegram polling.")
+            return 0
 
         if args.telegram_chat_id:
             chat_ids = private_chat_ids()
@@ -207,10 +218,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             print_matching_report(ranked_results, profile)
             return 0
 
-        if args.outreach or args.digest_preview or args.telegram_test:
+        if args.outreach or args.digest_preview or args.telegram_test or args.telegram_review:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
             with session_factory() as session:
                 routes = build_outreach_routes(session, settings)
+            if args.telegram_review:
+                count = send_job_cards(routes)
+                print(f"Telegram confirmed {count} review card(s).")
+                return 0
             if args.telegram_test:
                 count = send_test_digest(format_digest(routes))
                 print(f"Telegram confirmed {count} test message(s).")

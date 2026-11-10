@@ -31,6 +31,7 @@ class OutreachRoute:
     contact: str | None = None
     location: str | None = None
     match_score: float | None = None
+    job_id: int | None = None
 
 
 def _public_link(value: str | None) -> str | None:
@@ -45,7 +46,9 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
     ranker = OpportunityRanker(session=session, settings=settings)
     jobs = {job.id: job for job in session.scalars(select(JobModel))}
     routes = []
-    seen_urls = set()
+    seen_urls = {
+        job.normalized_job_url for job in jobs.values() if job.status in {"skipped", "applied"}
+    }
     for match in ranker.rank_opportunities(limit=len(jobs)):
         job = jobs.get(match.job_id)
         if not job or job.status != "open" or match.eligibility_status != EligibilityStatus.ELIGIBLE:
@@ -74,10 +77,11 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
             company=match.company_name, title=match.job_title, url=url, contact=contact,
             action="Review email candidate" if contact else "Apply link",
             location=match.location, match_score=match.match_score,
+            job_id=job.id,
         ))
 
     for company in session.scalars(select(CompanyModel).order_by(CompanyModel.company_name)):
-        if any(job.status == "open" for job in company.jobs):
+        if any(job.status in {"open", "skipped", "applied"} for job in company.jobs):
             continue
         if ranker.startup_filter.evaluate(company.employee_count).status != StartupEligibilityStatus.ELIGIBLE:
             continue
