@@ -84,7 +84,7 @@ candidate:
     # roles explicitly intended for interns, freshers, new grads, or juniors.
     strict_fresher_only: true
     max_required_experience_years: 2
-    small_startup_max_employees: 200
+    small_startup_max_employees: 100
     allow_unknown_company_size: false
     target_roles:
       - "Software Development Intern"

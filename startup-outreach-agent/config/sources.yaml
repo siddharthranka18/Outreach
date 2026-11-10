@@ -44,5 +44,5 @@ sources:
   - name: "company_career_sites"
     display_name: "Direct Career Pages & ATS"
     type: "direct_ats"
-    enabled: false
-    description: "ATS boards are discovered automatically from small-startup job links; reserved for future manually seeded boards."
+    enabled: true
+    description: "Public employer ATS boards with reviewed company-size evidence."

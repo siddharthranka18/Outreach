@@ -21,6 +21,7 @@ from startup_agent.discovery.wellfound import WellfoundDiscoverySource
 from startup_agent.discovery.y_combinator import YCombinatorDiscoverySource
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
+from startup_agent.matching.profile import CandidatePreferences, CandidateProfile
 from startup_agent.utils.normalizers import normalize_name, normalize_website
 from startup_agent.matching.startup_filter import (
     StartupEligibilityFilter,
@@ -81,7 +82,7 @@ class DiscoveryPipeline:
         custom_adapters: Optional[List[BaseDiscoverySource]] = None,
         ats_http_client: Optional[HttpClient] = None,
         auto_expand_ats: bool = True,
-        max_startup_employees: int = 200,
+        max_startup_employees: Optional[int] = None,
     ) -> None:
         self.settings = settings or Settings.load()
         self.session = session
@@ -93,6 +94,12 @@ class DiscoveryPipeline:
             yaml.safe_load(evidence_path.read_text(encoding="utf-8")) or {}
             if evidence_path.exists() else {}
         )
+        if max_startup_employees is None:
+            profile_path = self.settings.config_dir / "candidate_profile.yaml"
+            max_startup_employees = (
+                CandidateProfile.load(profile_path).preferences.small_startup_max_employees
+                if profile_path.is_file() else CandidatePreferences.small_startup_max_employees
+            )
         self.startup_filter = StartupEligibilityFilter(
             max_employees=max_startup_employees,
             allow_unknown=False,
@@ -115,6 +122,23 @@ class DiscoveryPipeline:
                     if evidence.get("himalayas_slug")
                 }
                 adapters.append(HimalayasDiscoverySource(employers, name=src.name))
+            elif adapter_cls is DirectAtsDiscoverySource:
+                targets = []
+                for domain, evidence in self.size_evidence.items():
+                    board_url = evidence.get("ats_url")
+                    company_name = evidence.get("company_name")
+                    size = evidence.get("employee_count")
+                    if not board_url or not company_name:
+                        continue
+                    if self.startup_filter.evaluate(size).status != StartupEligibilityStatus.ELIGIBLE:
+                        continue
+                    target = extract_ats_target(board_url, company_name, f"https://{domain}", size)
+                    if target:
+                        target["source_url"] = board_url
+                        targets.append(target)
+                adapters.append(DirectAtsDiscoverySource(
+                    name=src.name, targets=targets, http_client=self.ats_http_client,
+                ))
             elif adapter_cls:
                 adapters.append(adapter_cls(name=src.name, enabled=True))
             else:
@@ -204,7 +228,10 @@ class DiscoveryPipeline:
 
     def _hydrate_known_company_sizes(self, companies: List[Company]) -> None:
         """Reuse a size verified by an earlier source before ATS expansion."""
-        unknown_companies = [company for company in companies if not company.employee_count]
+        unknown_companies = [
+            company for company in companies
+            if not company.employee_count or company.normalized_website.split("/", 1)[0] in self.size_evidence
+        ]
         if not unknown_companies:
             return
 

@@ -77,7 +77,7 @@ class CandidatePreferences:
     exclude_seniority: List[str] = field(default_factory=list)
     strict_fresher_only: bool = True
     max_required_experience_years: int = 2
-    small_startup_max_employees: int = 200
+    small_startup_max_employees: int = 100
     allow_unknown_company_size: bool = False
 
 
@@ -151,7 +151,7 @@ class CandidateProfile:
                 "max_required_experience_years", 2
             ),
             small_startup_max_employees=prefs_data.get(
-                "small_startup_max_employees", 200
+                "small_startup_max_employees", CandidatePreferences.small_startup_max_employees
             ),
             allow_unknown_company_size=prefs_data.get(
                 "allow_unknown_company_size", False

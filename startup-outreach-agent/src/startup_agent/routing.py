@@ -50,6 +50,9 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
         job = jobs.get(match.job_id)
         if not job or job.status != "open" or match.eligibility_status != EligibilityStatus.ELIGIBLE:
             continue
+        if re.search(r"\b(?:this role is for one of our clients|on behalf of (?:one of )?our clients?)\b",
+                     job.description or "", re.IGNORECASE):
+            continue
         url = _public_link(job.job_url) or _public_link(match.careers_url)
         if not url:
             continue
