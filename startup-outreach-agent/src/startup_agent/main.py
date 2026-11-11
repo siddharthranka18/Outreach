@@ -182,6 +182,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--telegram-chat-id", action="store_true", help="List recent private chat IDs.")
     parser.add_argument("--telegram-test", action="store_true", help="Send a one-time Telegram digest.")
     parser.add_argument("--telegram-review", action="store_true", help="Send job cards and listen for Telegram actions.")
+    parser.add_argument("--telegram-daily", action="store_true", help="Run discovery, post the current shortlist, and exit.")
     parser.add_argument("--email-preview", action="store_true", help="Preview one local outreach email draft.")
     parser.add_argument("--email-llm-preview", action="store_true", help="Preview one outreach email draft written by Gemini.")
     parser.add_argument("--email-save", action="store_true", help="Generate and save one Gemini draft for review.")
@@ -265,7 +266,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"Private chat ID: {chat_id}")
             return 0
 
-        if args.discover:
+        if args.discover or args.telegram_daily:
             print("\n>>> Launching multi-source discovery pipeline...")
             summary = run_discovery_pipeline(settings=settings)
             print_discovery_report(summary)
@@ -273,6 +274,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             if summary.all_failed:
                 print("ERROR: All attempted discovery sources failed.", file=sys.stderr)
                 return 1
+            if args.telegram_daily:
+                session_factory = create_session_factory(create_db_engine(settings.database_url))
+                with session_factory() as session:
+                    routes = build_outreach_routes(session, settings)
+                count = send_job_cards(routes)
+                print(f"Telegram confirmed {count} review card(s).")
             return 0
 
         if args.match:
