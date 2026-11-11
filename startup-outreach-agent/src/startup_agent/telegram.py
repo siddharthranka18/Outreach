@@ -1,6 +1,7 @@
 """Telegram Bot API helpers for the local digest delivery test."""
 
 import hmac
+from collections.abc import Callable
 import hashlib
 import json
 import logging
@@ -354,15 +355,18 @@ def _save_email_edit(message: dict, chat_id: int, session_factory) -> None:
         _request("sendMessage", {"chat_id": chat_id, "text": str(exc)})
 
 
-def poll_job_actions(session_factory) -> None:
+def poll_job_actions(session_factory, *, after_pending: Callable[[], None] | None = None) -> None:
     chat_id = _private_chat_id()
     offset = 0
     logger = logging.getLogger(__name__)
     while True:
         updates = _request("getUpdates", {
-            "offset": offset, "timeout": 10,
+            "offset": offset, "timeout": 0 if after_pending is not None else 10,
             "allowed_updates": ["message", "callback_query"],
         })["result"]
+        if not updates and after_pending is not None:
+            after_pending()
+            after_pending = None
         for item in updates:
             callback = item.get("callback_query")
             if callback:

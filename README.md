@@ -26,8 +26,8 @@ Put local credentials in `startup-outreach-agent/.env`. Use `TELEGRAM_BOT_TOKEN`
 
 | Command | What it does |
 | --- | --- |
-| `python run.py --telegram-review` | Posts eligible job cards with Skip and Mark Applied. |
-| `python run.py --telegram-poll` | Processes Telegram buttons and draft edits while the command is running. |
+| `python run.py --telegram-review` | Posts job cards, then processes Telegram button taps and draft edits until you press Ctrl+C. |
+| `python run.py --telegram-poll` | Listens for actions on cards already posted. |
 | `python run.py --email-preview` | Previews one draft from the local template. |
 | `python run.py --email-save` | Generates one Gemini draft or reuses the saved version, and prints its job ID. |
 | `python run.py --telegram-email-card-preview JOB_ID` | Shows a preview card in Telegram. |

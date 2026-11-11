@@ -1,5 +1,12 @@
 version: "1.0"
 sources:
+  - name: "venomics_careers"
+    display_name: "Venomics AI Careers"
+    type: "employer_careers"
+    url: "https://venomics.ai/careers.html"
+    enabled: true
+    description: "Official internship listing for a size-reviewed employer found through funding research."
+
   - name: "himalayas"
     display_name: "Himalayas"
     type: "public_jobs_api"

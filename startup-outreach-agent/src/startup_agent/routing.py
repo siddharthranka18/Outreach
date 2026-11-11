@@ -62,7 +62,14 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
     }
     for match in ranker.rank_opportunities(limit=len(jobs)):
         job = jobs.get(match.job_id)
-        if not job or job.status != "open" or match.eligibility_status != EligibilityStatus.ELIGIBLE:
+        if not job or job.status != "open":
+            continue
+        needs_location_review = (
+            job.source_name == "venomics_careers"
+            and match.eligibility_status == EligibilityStatus.POTENTIALLY_ELIGIBLE
+            and not job.location
+        )
+        if match.eligibility_status != EligibilityStatus.ELIGIBLE and not needs_location_review:
             continue
         if re.search(r"\b(?:this role is for one of our clients|on behalf of (?:one of )?our clients?)\b",
                      job.description or "", re.IGNORECASE):
@@ -94,7 +101,8 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
         routes.append(OutreachRoute(
             company=match.company_name, title=match.job_title, url=url, contact=contact,
             contact_source=contact_source,
-            action="Review email candidate" if contact else "Apply link",
+            action=("Confirm location" if needs_location_review else
+                    "Review email candidate" if contact else "Apply link"),
             location=match.location, match_score=match.match_score,
             job_id=job.id,
             relevant_projects=tuple(match.relevant_projects),

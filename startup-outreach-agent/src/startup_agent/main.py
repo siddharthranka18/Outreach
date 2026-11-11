@@ -5,11 +5,13 @@ import sys
 from typing import List, Optional
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+import yaml
 from startup_agent.config.settings import Settings
 from startup_agent.database.engine import create_db_engine
 from startup_agent.database.models import EmailDraftModel
 from startup_agent.database.session import create_session_factory
 from startup_agent.digest import format_digest
+from startup_agent.discovery.funding_leads import print_funding_leads
 from startup_agent.email_drafts import EmailDraft, format_email_draft, generate_email_draft, generate_llm_email_draft
 from startup_agent.discovery.pipeline import DiscoverySummary, run_discovery_pipeline
 from startup_agent.matching.eligibility import EligibilityStatus
@@ -179,7 +181,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--telegram-chat-id", action="store_true", help="List recent private chat IDs.")
     parser.add_argument("--telegram-test", action="store_true", help="Send a one-time Telegram digest.")
-    parser.add_argument("--telegram-review", action="store_true", help="Send job cards with review buttons.")
+    parser.add_argument("--telegram-review", action="store_true", help="Send job cards and listen for Telegram actions.")
     parser.add_argument("--email-preview", action="store_true", help="Preview one local outreach email draft.")
     parser.add_argument("--email-llm-preview", action="store_true", help="Preview one outreach email draft written by Gemini.")
     parser.add_argument("--email-save", action="store_true", help="Generate and save one Gemini draft for review.")
@@ -188,11 +190,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--telegram-email-approve", type=int, metavar="JOB_ID", help="Send a saved employer draft to Telegram for approval.")
     parser.add_argument("--telegram-email-card-preview", type=int, metavar="JOB_ID", help="Show a read-only approval card in Telegram.")
     parser.add_argument("--telegram-poll", action="store_true", help="Listen for Telegram job actions.")
+    parser.add_argument("--funding-leads", action="store_true", help="Preview recent Indian startup funding leads.")
 
     cli_args = argv if argv is not None else []
     args = parser.parse_args(cli_args)
 
     try:
+        if args.funding_leads:
+            evidence_path = Settings.load().config_dir / "company_sizes.yaml"
+            evidence = yaml.safe_load(evidence_path.read_text(encoding="utf-8")) if evidence_path.is_file() else {}
+            reviewed = {
+                " ".join(row["funding_tracker_name"].casefold().split()): row
+                for row in (evidence or {}).values() if row.get("funding_tracker_name") and row.get("careers_url")
+            }
+            print_funding_leads(reviewed)
+            return 0
         settings = initialize_app()
 
         if args.telegram_email_approve is not None or args.telegram_email_card_preview is not None:
@@ -228,11 +240,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("Saved draft delivered to your Telegram chat for review.")
             return 0
 
-        if args.telegram_poll:
+        if args.telegram_poll or args.telegram_review:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
-            print("Listening for Telegram job actions. Press Ctrl+C to stop.", flush=True)
+
+            def post_shortlist() -> None:
+                with session_factory() as session:
+                    routes = build_outreach_routes(session, settings)
+                count = send_job_cards(routes)
+                print(f"Telegram confirmed {count} review card(s).", flush=True)
+
             try:
-                poll_job_actions(session_factory)
+                print("Listening for Telegram job actions. Press Ctrl+C to stop.", flush=True)
+                poll_job_actions(session_factory, after_pending=post_shortlist if args.telegram_review else None)
             except KeyboardInterrupt:
                 print("\nStopped Telegram polling.")
             return 0
@@ -264,12 +283,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             print_matching_report(ranked_results, profile)
             return 0
 
-        if args.outreach or args.digest_preview or args.telegram_test or args.telegram_review or args.email_preview or args.email_llm_preview or args.email_save:
+        if args.outreach or args.digest_preview or args.telegram_test or args.email_preview or args.email_llm_preview or args.email_save:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
             with session_factory() as session:
                 routes = build_outreach_routes(session, settings)
             if args.email_preview or args.email_llm_preview or args.email_save:
-                openings = [route for route in routes if route.job_id is not None]
+                openings = [route for route in routes if route.job_id is not None and route.action != "Confirm location"]
                 if not openings:
                     print("No eligible openings to draft for.")
                     return 0
@@ -303,10 +322,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(draft_writer(route, profile))
                 if route.contact_source:
                     print(f"\nRecipient source: {route.contact_source}")
-                return 0
-            if args.telegram_review:
-                count = send_job_cards(routes)
-                print(f"Telegram confirmed {count} review card(s).")
                 return 0
             if args.telegram_test:
                 count = send_test_digest(format_digest(routes))

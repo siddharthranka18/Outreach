@@ -9,7 +9,25 @@ from startup_agent.models.job import Job
 from startup_agent.telegram import (
     _employer_signature, _gmail_test_signature, _record_employer_email, _record_gmail_test, _record_job_action,
     _save_email_edit,
+    poll_job_actions,
 )
+
+
+def test_review_processes_pending_actions_before_posting(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+    events = []
+    update = {"update_id": 42, "callback_query": {"id": "tap", "data": "job:skipped:1"}}
+    with (
+        patch("startup_agent.telegram._request", side_effect=[
+            {"result": [update]}, {"ok": True}, {"result": []}, KeyboardInterrupt,
+        ]) as request,
+        patch("startup_agent.telegram._record_job_action",
+              side_effect=lambda *args: events.append("skip") or "Skipped"),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        poll_job_actions(None, after_pending=lambda: events.append("post"))
+    assert events == ["skip", "post"]
+    assert request.call_args_list[-1].args[1]["timeout"] == 10
 
 
 @pytest.mark.parametrize("self_test", [True, False])
