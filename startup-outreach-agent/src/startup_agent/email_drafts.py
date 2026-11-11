@@ -3,6 +3,7 @@
 import json
 import os
 import re
+from dataclasses import dataclass
 
 import httpx
 
@@ -10,6 +11,18 @@ from startup_agent.matching.profile import CandidateProfile
 from startup_agent.routing import OutreachRoute
 
 GEMINI_MODEL = "gemini-3.1-flash-lite"
+
+
+@dataclass(frozen=True)
+class EmailDraft:
+    recipient: str | None
+    subject: str
+    body: str
+    listing_url: str
+
+    def preview(self) -> str:
+        recipient = self.recipient or "(no published hiring inbox for this listing)"
+        return f"To: {recipient}\nSubject: {self.subject}\nListing: {self.listing_url}\n\n{self.body}"
 
 
 def _draft_evidence(route: OutreachRoute, profile: CandidateProfile) -> str:
@@ -70,6 +83,10 @@ def format_email_draft(route: OutreachRoute, profile: CandidateProfile) -> str:
 
 
 def generate_llm_email_draft(route: OutreachRoute, profile: CandidateProfile) -> str:
+    return generate_email_draft(route, profile).preview()
+
+
+def generate_email_draft(route: OutreachRoute, profile: CandidateProfile) -> EmailDraft:
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         raise ValueError("Set GEMINI_API_KEY in your local .env to use the LLM preview.")
@@ -145,10 +162,11 @@ def generate_llm_email_draft(route: OutreachRoute, profile: CandidateProfile) ->
     if not subject or not body or len(subject) > 150 or len(body.split()) > 120 or "\n" in subject or "\r" in subject:
         raise RuntimeError("Gemini returned a draft outside the preview's format limits.")
 
-    recipient = route.contact or "(no published hiring inbox for this listing)"
     company = " ".join(route.company.split())
     name = " ".join(profile.name.split())
-    return (
-        f"To: {recipient}\nSubject: {subject}\nListing: {route.url}\n\n"
-        f"Hi {company} hiring team,\n\n{body}\n\nThanks,\n{name}"
+    return EmailDraft(
+        recipient=route.contact,
+        subject=subject,
+        body=f"Hi {company} hiring team,\n\n{body}\n\nThanks,\n{name}",
+        listing_url=route.url or "",
     )

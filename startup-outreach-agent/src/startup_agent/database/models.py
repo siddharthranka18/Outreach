@@ -129,3 +129,15 @@ class JobModel(Base):
             f"company_id={self.company_id}, status='{self.status}')>"
         )
 
+
+class EmailDraftModel(Base):
+    """Saved text and recipient for an individual job's outreach review."""
+
+    __tablename__ = "email_drafts"
+
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True)
+    recipient: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    subject: Mapped[str] = mapped_column(String(150), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    listing_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+
