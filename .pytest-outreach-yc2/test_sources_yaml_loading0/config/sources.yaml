@@ -1,9 +1,0 @@
-
-version: "1.0"
-sources:
-  - name: "test_source"
-    display_name: "Test Source"
-    type: "directory"
-    enabled: true
-    description: "A test directory"
-    url: "https://example.com"

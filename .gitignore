@@ -1,0 +1,10 @@
+# Pytest output generated at the repository root or inside the application.
+.pytest_cache/
+.pytest-*/
+.test-run/
+
+# Local credentials and runtime data.
+.env
+.env.*
+!.env.example
+__pycache__/
