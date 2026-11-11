@@ -17,7 +17,10 @@ from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.ranker import OpportunityRanker
 from startup_agent.matching.scorer import MatchResult
 from startup_agent.routing import build_outreach_routes
-from startup_agent.telegram import poll_job_actions, private_chat_ids, send_gmail_test_card, send_job_cards, send_test_digest
+from startup_agent.telegram import (
+    poll_job_actions, private_chat_ids, send_employer_email_card,
+    send_gmail_test_card, send_job_cards, send_test_digest,
+)
 from startup_agent.utils.logging_config import setup_logging
 
 
@@ -182,6 +185,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--email-save", action="store_true", help="Generate and save one Gemini draft for review.")
     parser.add_argument("--telegram-email-review", type=int, metavar="JOB_ID", help="Show a saved draft in your Telegram chat.")
     parser.add_argument("--telegram-gmail-test", type=int, metavar="JOB_ID", help="Review and approve a Gmail self-test.")
+    parser.add_argument("--telegram-email-approve", type=int, metavar="JOB_ID", help="Send a saved employer draft to Telegram for approval.")
+    parser.add_argument("--telegram-email-card-preview", type=int, metavar="JOB_ID", help="Show a read-only approval card in Telegram.")
     parser.add_argument("--telegram-poll", action="store_true", help="Listen for Telegram job actions.")
 
     cli_args = argv if argv is not None else []
@@ -189,6 +194,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         settings = initialize_app()
+
+        if args.telegram_email_approve is not None or args.telegram_email_card_preview is not None:
+            preview = args.telegram_email_card_preview is not None
+            job_id = args.telegram_email_card_preview if preview else args.telegram_email_approve
+            session_factory = create_session_factory(create_db_engine(settings.database_url))
+            with session_factory() as session:
+                saved = session.get(EmailDraftModel, job_id)
+                if saved is None:
+                    raise ValueError("No saved email draft for that job ID.")
+                send_employer_email_card(saved, preview=preview)
+            print("Email card preview delivered to Telegram." if preview else "Employer email approval card delivered to Telegram.")
+            return 0
 
         if args.telegram_gmail_test is not None:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
