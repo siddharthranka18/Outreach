@@ -140,4 +140,5 @@ class EmailDraftModel(Base):
     subject: Mapped[str] = mapped_column(String(150), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     listing_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    gmail_test_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
 

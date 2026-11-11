@@ -17,7 +17,7 @@ from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.ranker import OpportunityRanker
 from startup_agent.matching.scorer import MatchResult
 from startup_agent.routing import build_outreach_routes
-from startup_agent.telegram import poll_job_actions, private_chat_ids, send_job_cards, send_test_digest
+from startup_agent.telegram import poll_job_actions, private_chat_ids, send_gmail_test_card, send_job_cards, send_test_digest
 from startup_agent.utils.logging_config import setup_logging
 
 
@@ -181,6 +181,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--email-llm-preview", action="store_true", help="Preview one outreach email draft written by Gemini.")
     parser.add_argument("--email-save", action="store_true", help="Generate and save one Gemini draft for review.")
     parser.add_argument("--telegram-email-review", type=int, metavar="JOB_ID", help="Show a saved draft in your Telegram chat.")
+    parser.add_argument("--telegram-gmail-test", type=int, metavar="JOB_ID", help="Review and approve a Gmail self-test.")
     parser.add_argument("--telegram-poll", action="store_true", help="Listen for Telegram job actions.")
 
     cli_args = argv if argv is not None else []
@@ -188,6 +189,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         settings = initialize_app()
+
+        if args.telegram_gmail_test is not None:
+            session_factory = create_session_factory(create_db_engine(settings.database_url))
+            with session_factory() as session:
+                saved = session.get(EmailDraftModel, args.telegram_gmail_test)
+                if saved is None:
+                    raise ValueError("No saved email draft for that job ID.")
+                send_gmail_test_card(saved)
+            print("Gmail self-test approval card delivered to Telegram.")
+            return 0
 
         if args.telegram_email_review is not None:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
@@ -268,9 +279,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                                 raise
                     draft = EmailDraft(saved.recipient, saved.subject, saved.body, saved.listing_url)
                     print(f"Saved draft for job #{saved.job_id}\n\n{draft.preview()}")
+                    if route.contact_source and saved.recipient == route.contact:
+                        print(f"\nRecipient source: {route.contact_source}")
                     return 0
                 print(f"{mode} email draft preview for {route.title} @ {route.company}\n", flush=True)
                 print(draft_writer(route, profile))
+                if route.contact_source:
+                    print(f"\nRecipient source: {route.contact_source}")
                 return 0
             if args.telegram_review:
                 count = send_job_cards(routes)
@@ -289,7 +304,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if route.url:
                     print(f"  Link: {route.url}")
                 if route.contact:
-                    print(f"  Published in job text (delivery unverified): {route.contact}")
+                    print(f"  Published contact (delivery unverified): {route.contact}")
+                    print(f"  Contact source: {route.contact_source}")
             print(f"\n{sum(bool(route.title) for route in routes)} opportunity routes, "
                   f"{sum(not route.title for route in routes)} watchlist companies.")
             return 0

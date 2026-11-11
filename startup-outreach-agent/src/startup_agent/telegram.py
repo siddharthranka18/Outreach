@@ -1,15 +1,18 @@
 """Telegram Bot API helpers for the local digest delivery test."""
 
+import hmac
 import json
 import logging
 import os
 import re
+import smtplib
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from sqlalchemy import update
 
-from startup_agent.database.models import JobModel
+from startup_agent.database.models import EmailDraftModel, JobModel
+from startup_agent.gmail import gmail_address, gmail_app_password, send_gmail_self_test
 from startup_agent.digest import format_digest
 from startup_agent.routing import OutreachRoute
 
@@ -103,9 +106,72 @@ def send_job_cards(routes: list[OutreachRoute]) -> int:
     return sent
 
 
-def _record_job_action(callback: dict, chat_id: int, session_factory) -> str:
+def _authorized_callback(callback: dict, chat_id: int) -> bool:
     chat = callback.get("message", {}).get("chat", {})
-    if chat.get("type") != "private" or chat.get("id") != chat_id or callback.get("from", {}).get("id") != chat_id:
+    return chat.get("type") == "private" and chat.get("id") == chat_id and callback.get("from", {}).get("id") == chat_id
+
+
+def _gmail_test_signature(draft: EmailDraftModel, address: str) -> str:
+    payload = json.dumps([draft.job_id, address, draft.subject, draft.body]).encode()
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().encode()
+    return hmac.digest(token, payload, "sha256").hex()[:24]
+
+
+def send_gmail_test_card(draft: EmailDraftModel) -> None:
+    address = gmail_address()
+    gmail_app_password()
+    if draft.gmail_test_status != "pending":
+        raise ValueError(f"This draft's Gmail test is already {draft.gmail_test_status}.")
+    signature = _gmail_test_signature(draft, address)
+    _request("sendMessage", {
+        "chat_id": _private_chat_id(),
+        "text": f"Gmail self-test\nTo: {address}\nSubject: [Test] {draft.subject}\n\n{draft.body}",
+        "link_preview_options": {"is_disabled": True},
+        "reply_markup": {"inline_keyboard": [[
+            {"text": "Approve & Send Test", "callback_data": f"gmail-test:{draft.job_id}:{signature}"},
+        ]]},
+    })
+
+
+def _record_gmail_test(callback: dict, chat_id: int, session_factory) -> str:
+    if not _authorized_callback(callback, chat_id):
+        return "This action is unavailable in this chat."
+    action = re.fullmatch(r"gmail-test:([1-9][0-9]{0,17}):([a-f0-9]{24})", callback.get("data") or "")
+    if not action:
+        return "Invalid Gmail test approval."
+    job_id, signature = action.groups()
+    try:
+        address, password = gmail_address(), gmail_app_password()
+    except ValueError as exc:
+        return str(exc)
+    with session_factory.begin() as session:
+        draft = session.get(EmailDraftModel, int(job_id))
+        if not draft or not hmac.compare_digest(signature, _gmail_test_signature(draft, address)):
+            return "Draft or Gmail address changed. Open a new test card."
+        result = session.execute(
+            update(EmailDraftModel)
+            .where(EmailDraftModel.job_id == draft.job_id, EmailDraftModel.gmail_test_status == "pending")
+            .values(gmail_test_status="sending")
+        )
+        if result.rowcount != 1:
+            return "Test already handled. Check Gmail Sent before trying again."
+        subject, body = draft.subject, draft.body
+
+    try:
+        send_gmail_self_test(address, password, f"[Test] {subject}", body)
+    except smtplib.SMTPAuthenticationError:
+        status, feedback = "pending", "Gmail rejected the credentials. Check your app password."
+    except (OSError, ValueError):
+        status, feedback = "uncertain", "Gmail delivery could not be confirmed. Check Gmail Sent."
+    else:
+        status, feedback = "sent", "Gmail accepted the test email."
+    with session_factory.begin() as session:
+        session.get(EmailDraftModel, int(job_id)).gmail_test_status = status
+    return feedback
+
+
+def _record_job_action(callback: dict, chat_id: int, session_factory) -> str:
+    if not _authorized_callback(callback, chat_id):
         return "This action is unavailable in this chat."
     action = re.fullmatch(r"job:(skipped|applied):([1-9][0-9]{0,17})", callback.get("data") or "")
     if not action:
@@ -133,7 +199,11 @@ def poll_job_actions(session_factory) -> None:
         for item in updates:
             callback = item.get("callback_query")
             if callback:
-                message = _record_job_action(callback, chat_id, session_factory)
+                handler = (
+                    _record_gmail_test if (callback.get("data") or "").startswith("gmail-test:")
+                    else _record_job_action
+                )
+                message = handler(callback, chat_id, session_factory)
                 if message in {"Skipped", "Marked applied"}:
                     logger.info("Telegram action saved for job #%s: %s", callback["data"].rsplit(":", 1)[1], message)
                 else:
