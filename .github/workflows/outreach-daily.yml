@@ -27,6 +27,14 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
       - run: python -m alembic upgrade head
+      - name: Refresh funding and portfolio leads
+        continue-on-error: true
+        run: |
+          python run.py --funding-leads > "$RUNNER_TEMP/outreach-leads.txt"
+          if [ "$?" -ne 0 ]; then exit 1; fi
+          printf '## Startup leads to review\n\n```text\n' >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/outreach-leads.txt" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
       - run: python run.py --hosted-daily
         env:
           OUTREACH_WEB_APP_URL: ${{ secrets.OUTREACH_WEB_APP_URL }}

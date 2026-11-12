@@ -1,5 +1,11 @@
 version: "1.0"
 sources:
+  - name: "reviewed_careers"
+    display_name: "Reviewed Startup Careers"
+    type: "employer_careers"
+    enabled: true
+    description: "Technical internships on LivingAI and Curvvtech's official careers pages."
+
   - name: "venomics_careers"
     display_name: "Venomics AI Careers"
     type: "employer_careers"

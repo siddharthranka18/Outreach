@@ -17,6 +17,7 @@ from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract
 from startup_agent.discovery.hasjob import HasjobDiscoverySource
 from startup_agent.discovery.himalayas import HimalayasDiscoverySource
 from startup_agent.discovery.venomics import VenomicsDiscoverySource
+from startup_agent.discovery.reviewed_careers import ReviewedCareersDiscoverySource
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
 from startup_agent.discovery.wellfound import WellfoundDiscoverySource
 from startup_agent.discovery.y_combinator import YCombinatorDiscoverySource
@@ -38,6 +39,7 @@ SOURCE_ADAPTER_REGISTRY: Dict[str, Type[BaseDiscoverySource]] = {
     "hasjob": HasjobDiscoverySource,
     "himalayas": HimalayasDiscoverySource,
     "venomics_careers": VenomicsDiscoverySource,
+    "reviewed_careers": ReviewedCareersDiscoverySource,
     "y_combinator": YCombinatorDiscoverySource,
     "top_startups": TopStartupsDiscoverySource,
     "wellfound_india": WellfoundDiscoverySource,

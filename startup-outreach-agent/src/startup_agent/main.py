@@ -209,7 +209,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 " ".join(row["funding_tracker_name"].casefold().split()): row
                 for row in (evidence or {}).values() if row.get("funding_tracker_name") and row.get("careers_url")
             }
-            print_funding_leads(reviewed)
+            portfolio = [
+                row for row in (evidence or {}).values() if row.get("discovery_url") and row.get("careers_url")
+            ]
+            print_funding_leads(reviewed, portfolio_companies=portfolio)
             return 0
         settings = initialize_app()
 

@@ -1,4 +1,36 @@
 # Publicly reported employee bands, keyed by the employer's official domain.
+stance.health:
+  company_name: Stance Health
+  employee_count: "11-50"
+  source_url: https://careers.antler.co/companies/stance-health
+  checked_on: 2026-11-12
+  discovery_url: https://careers.antler.co/companies/stance-health
+  careers_url: https://www.stance.health/careers
+  hiring_email: careers@stance.health
+  accepts_enquiries: true
+  enquiry_interest: "I'm interested in the software behind your sports rehab and performance services."
+atomicwork.com:
+  company_name: Atomicwork
+  employee_count: "51-200"
+  source_url: https://www.linkedin.com/company/atomicworkhq
+  checked_on: 2026-11-12
+  discovery_url: https://blume.vc/atomicwork
+  careers_url: https://www.atomicwork.com/company/careers
+wizcommerce.com:
+  company_name: WizCommerce
+  employee_count: "51-200"
+  source_url: https://www.linkedin.com/company/wizcommerce
+  checked_on: 2026-11-12
+  discovery_url: https://blume.vc/wizcommerce
+  careers_url: https://wizcommerce.com/careers/
+livingai.in:
+  employee_count: "11-50"
+  source_url: https://www.linkedin.com/company/livingai-in
+  checked_on: 2026-11-12
+curvvtech.com:
+  employee_count: "2-10"
+  source_url: https://in.linkedin.com/company/curvvtech
+  checked_on: 2026-11-12
 enterpret.com:
   company_name: Enterpret
   employee_count: "11-50"

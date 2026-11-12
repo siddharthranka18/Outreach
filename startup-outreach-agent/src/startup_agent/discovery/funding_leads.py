@@ -14,7 +14,8 @@ STAGES = {"pre-seed", "seed", "angel", "series a"}
 CATEGORIES = {"ai", "deep tech", "saas", "security", "climate tech", "fintech & payments", "govtech"}
 
 
-def print_funding_leads(reviewed_companies: dict, *, today: date | None = None) -> None:
+def print_funding_leads(reviewed_companies: dict, *, portfolio_companies: list[dict] | None = None,
+                        today: date | None = None) -> None:
     today = today or datetime.now().astimezone().date()
     cutoff = today - timedelta(days=30)
     response = HttpClient().get(CSV_URL)
@@ -54,3 +55,9 @@ def print_funding_leads(reviewed_companies: dict, *, today: date | None = None) 
         else:
             print("  Employer domain, size, and openings need review.")
     print(f"\n{len(seen)} funding leads from the past 30 days.")
+    if portfolio_companies:
+        print("\nReviewed portfolio employers")
+        for company in portfolio_companies:
+            print(f"  {company['company_name']} | {company['employee_count']} employees")
+            print(f"    Portfolio: {company['discovery_url']}")
+            print(f"    Careers: {company['careers_url']}")

@@ -102,8 +102,9 @@ def normalize_job_url(job_url: str) -> str:
     ]
     query = urlencode(filtered_params)
 
-    # Reconstruct canonical URL (strip fragment)
-    return urlunparse((scheme, netloc, path, "", query, ""))
+    # LivingAI uses anchors as the permanent identifiers of distinct openings.
+    fragment = parsed.fragment if netloc == "livingai.in" and path == "/careers" else ""
+    return urlunparse((scheme, netloc, path, "", query, fragment))
 
 
 def normalize_name(name: str) -> str:

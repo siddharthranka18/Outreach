@@ -19,13 +19,23 @@ from startup_agent.digest import format_digest
 from startup_agent.routing import build_outreach_routes
 from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.startup_filter import StartupEligibilityFilter, StartupEligibilityStatus
-from startup_agent.utils.normalizers import normalize_website
+from startup_agent.utils.normalizers import normalize_name, normalize_website
 from startup_agent.utils.http_client import HttpClient
 
 
 def cold_enquiry_cards(session: Session, settings: Settings, companies_with_matches: set[str]) -> list[dict]:
     path = settings.config_dir / "hiring_contacts.yaml"
     contacts = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}) if path.is_file() else {}
+    size_path = settings.config_dir / "company_sizes.yaml"
+    reviewed = (yaml.safe_load(size_path.read_text(encoding="utf-8")) or {}) if size_path.is_file() else {}
+    employer_contacts = [
+        {
+            **evidence, "email": evidence["hiring_email"], "source_url": evidence["careers_url"],
+            "reviewed_domain": domain,
+        }
+        for domain, evidence in reviewed.items()
+        if evidence.get("accepts_enquiries") is True and evidence.get("hiring_email") and evidence.get("careers_url")
+    ]
     profile = CandidateProfile.load(settings.config_dir / "candidate_profile.yaml")
     size_filter = StartupEligibilityFilter(max_employees=profile.preferences.small_startup_max_employees)
     companies = {
@@ -34,7 +44,7 @@ def cold_enquiry_cards(session: Session, settings: Settings, companies_with_matc
     client = HttpClient()
     cards = []
     seen_domains = set()
-    for entry in contacts.values():
+    for entry in [*contacts.values(), *employer_contacts]:
         if entry.get("accepts_enquiries") is not True:
             continue
         recipient = entry["email"].strip().lower()
@@ -45,9 +55,14 @@ def cold_enquiry_cards(session: Session, settings: Settings, companies_with_matc
         if not source.startswith("https://") or normalize_website(source).split("/", 1)[0] != domain:
             continue
         company = companies.get(domain)
-        if not company or domain in seen_domains or company.normalized_name in companies_with_matches:
+        reviewed_domain = entry.get("reviewed_domain")
+        company_name = company.company_name if company else entry.get("company_name")
+        if not company_name or (not company and reviewed_domain != domain):
             continue
-        if size_filter.evaluate(company.employee_count).status != StartupEligibilityStatus.ELIGIBLE:
+        if domain in seen_domains or normalize_name(company_name) in companies_with_matches:
+            continue
+        size = company.employee_count if company and company.employee_count else entry.get("employee_count")
+        if size_filter.evaluate(size).status != StartupEligibilityStatus.ELIGIBLE:
             continue
         try:
             page = BeautifulSoup(client.get(source).text, "html.parser")
@@ -59,18 +74,26 @@ def cold_enquiry_cards(session: Session, settings: Settings, companies_with_matc
         )
         if not published:
             continue
+        if reviewed_domain and any(
+            re.search(r"\b(?:intern\w*|junior|fresher|entry.level|new.grad)\b", label, re.IGNORECASE)
+            and re.search(r"\b(?:software|developer|backend|frontend|full.stack|AI|ML|data|devops)\b", label, re.IGNORECASE)
+            for node in page.select("h2, h3, h4, a[href], button")
+            if (label := node.get_text(" ", strip=True)) and len(label) <= 180
+        ):
+            continue
         seen_domains.add(domain)
         project = next((item for item in profile.projects if "full_stack" in item.outreach_roles), None)
         evidence = f" One of my recent projects is {project.title}. {project.description}" if project else ""
         cards.append({
             "job_url": f"https://{domain}/#outreach-enquiry",
-            "text": f"Internship enquiry @ {company.company_name}",
+            "text": f"Internship enquiry @ {company_name}",
             "draft": {
                 "recipient": recipient,
                 "subject": "Software engineering internship enquiry",
                 "body": (
-                    f"Hi {company.company_name} hiring team,\n\n"
-                    f"I'm {profile.name}, a computer science student looking for a software engineering internship."
+                    f"Hi {company_name} hiring team,\n\n"
+                    f"I'm {profile.name}, a computer science student looking for a software engineering internship. "
+                    f"{entry.get('enquiry_interest', '').strip()}"
                     f"{evidence}\n\n"
                     "Are you open to internship enquiries for your engineering team? "
                     "I've attached my resume for context.\n\n"
