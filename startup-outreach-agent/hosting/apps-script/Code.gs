@@ -120,11 +120,15 @@ function pollTelegram(reviewEnabled) {
     for (const update of updates) {
       const callback = update.callback_query;
       const data = callback?.data || '';
-      if (data.startsWith('hosted-test:') || (reviewEnabled && data.startsWith('hosted-job:'))) {
+      if (data.startsWith('hosted-test:') || (reviewEnabled && /^hosted-(job|mail):/.test(data))) {
         let feedback;
         try {
-          feedback = data.startsWith('hosted-job:')
-            ? handleHostedJobAction(config, callback) : handleTestApproval(config, callback);
+          if (data.startsWith('hosted-mail:')) {
+            feedback = handleHostedMail(config, callback);
+          } else {
+            feedback = data.startsWith('hosted-job:')
+              ? handleHostedJobAction(config, callback) : handleTestApproval(config, callback);
+          }
         } catch (_) {
           feedback = 'The action could not be completed. Check Apps Script Executions.';
         }
@@ -139,6 +143,8 @@ function pollTelegram(reviewEnabled) {
             telegram(config, 'sendMessage', {chat_id: config.chatId, text: feedback});
           }
         }
+      } else if (reviewEnabled && update.message) {
+        handleHostedMailEdit(config, update.message);
       }
       config.properties.setProperty(OFFSET_KEY, String(update.update_id + 1));
     }
@@ -223,10 +229,115 @@ function verifiedShortlist(event) {
       !/^(?:local-)?\d{1,24}$/.test(batch.run_id || '') ||
       !Array.isArray(batch.cards) || batch.cards.length > 100 ||
       batch.cards.some(card => typeof card?.text !== 'string' || !card.text || card.text.length > 4000 ||
-        typeof card.job_url !== 'string' || !/^https?:\/\/\S+$/i.test(card.job_url))) {
+        typeof card.job_url !== 'string' || !/^https?:\/\/\S+$/i.test(card.job_url) ||
+        (card.draft && !validHostedDraft(card.draft)))) {
     throw new Error('Invalid hosted shortlist.');
   }
   return batch;
+}
+
+function validHostedDraft(draft) {
+  return /^[a-z0-9._+%-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(draft?.recipient || '') &&
+    typeof draft.subject === 'string' && draft.subject.length > 0 && draft.subject.length <= 150 &&
+    !/[\r\n]/.test(draft.subject) && typeof draft.body === 'string' &&
+    draft.body.trim().length > 0 && draft.body.length <= 3000 &&
+    typeof draft.source_url === 'string' && /^https:\/\/\S+$/.test(draft.source_url);
+}
+
+function mailVersion(draft, resume) {
+  return jobKey(JSON.stringify([draft, resume.hash, resume.blob.getName()])).slice(0, 16);
+}
+
+function sendHostedMailCard(config, url, draft, resume) {
+  const key = jobKey(url);
+  const version = mailVersion(draft, resume);
+  telegram(config, 'sendMessage', {
+    chat_id: config.chatId,
+    text: `Cold internship enquiry\nTo: ${draft.recipient}\nSubject: ${draft.subject}\nAttachment: ${resume.blob.getName()}\nHiring contact: ${draft.source_url}\n\n${draft.body}`,
+    link_preview_options: {is_disabled: true},
+    reply_markup: {inline_keyboard: [[
+      {text: 'Edit', callback_data: `hosted-mail:e:${key}:${version}`},
+      {text: 'Approve & Send', callback_data: `hosted-mail:s:${key}:${version}`},
+      {text: 'Skip', callback_data: `hosted-job:skip:${key}`},
+    ]]},
+  });
+}
+
+function currentHostedMail(config, key, version) {
+  const {sheet, rows} = hostedHistory();
+  const index = rows.findIndex(row => row[1] && jobKey(row[1]) === key);
+  if (index < 0) throw new Error('This email draft is unavailable.');
+  const row = rows[index];
+  if (row[2] !== 'open' || row[3] !== 'pending') throw new Error('This draft is no longer pending. Check Gmail Sent.');
+  const draft = JSON.parse(row[4]);
+  if (!validHostedDraft(draft)) throw new Error('This draft is invalid.');
+  if (rows.some(other => ['sent', 'sending', 'uncertain'].includes(other[3]) &&
+      other[4] && JSON.parse(other[4]).recipient === draft.recipient)) {
+    throw new Error('This inbox already has an outreach attempt. Check Gmail Sent.');
+  }
+  const resume = resumeAttachment(config.fileId);
+  if (mailVersion(draft, resume) !== version) throw new Error('The draft or resume changed. Use the latest card.');
+  return {sheet, number: index + 2, url: row[1], draft, resume};
+}
+
+function handleHostedMail(config, callback) {
+  const chat = callback.message?.chat;
+  if (chat?.type !== 'private' || String(chat.id) !== config.chatId ||
+      String(callback.from?.id) !== config.chatId) return null;
+  const action = /^hosted-mail:([es]):([a-f0-9]{24}):([a-f0-9]{16})$/.exec(callback.data);
+  if (!action) return 'Invalid email action.';
+  const [, mode, key, version] = action;
+  let pending;
+  try {
+    pending = currentHostedMail(config, key, version);
+  } catch (error) {
+    return error.message;
+  }
+  if (mode === 'e') {
+    telegram(config, 'sendMessage', {
+      chat_id: config.chatId,
+      text: `Edit enquiry ${key}:${version}\nReply with the subject on the first line and the body below it.`,
+      reply_markup: {force_reply: true, input_field_placeholder: 'Subject, then body'},
+    });
+    return 'Reply to the edit prompt.';
+  }
+  if (MailApp.getRemainingDailyQuota() < 1) return 'Google mail quota is exhausted. Try again later.';
+  const status = pending.sheet.getRange(pending.number, 4);
+  status.setValue('sending');
+  SpreadsheetApp.flush();
+  try {
+    MailApp.sendEmail({
+      to: pending.draft.recipient, subject: pending.draft.subject, body: pending.draft.body,
+      attachments: [pending.resume.blob],
+    });
+  } catch (_) {
+    status.setValue('uncertain');
+    SpreadsheetApp.flush();
+    return 'Delivery uncertain. Check Gmail Sent before retrying.';
+  }
+  status.setValue('sent');
+  SpreadsheetApp.flush();
+  return 'Gmail accepted your internship enquiry.';
+}
+
+function handleHostedMailEdit(config, message) {
+  if (message.chat?.type !== 'private' || String(message.chat.id) !== config.chatId ||
+      String(message.from?.id) !== config.chatId || !message.reply_to_message?.from?.is_bot) return;
+  const marker = /^Edit enquiry ([a-f0-9]{24}):([a-f0-9]{16})$/.exec(
+    (message.reply_to_message.text || '').split('\n')[0],
+  );
+  if (!marker) return;
+  try {
+    const pending = currentHostedMail(config, marker[1], marker[2]);
+    const [firstLine, ...lines] = (message.text || '').split('\n');
+    const updated = {...pending.draft, subject: firstLine.trim(), body: lines.join('\n').trim()};
+    if (!validHostedDraft(updated)) throw new Error('Reply with a subject up to 150 characters and a body up to 3,000.');
+    pending.sheet.getRange(pending.number, 5).setValue(JSON.stringify(updated));
+    SpreadsheetApp.flush();
+    sendHostedMailCard(config, pending.url, updated, pending.resume);
+  } catch (error) {
+    telegram(config, 'sendMessage', {chat_id: config.chatId, text: error.message});
+  }
 }
 
 function publishHostedCards(batch) {
@@ -234,11 +345,22 @@ function publishHostedCards(batch) {
   const {sheet, rows} = hostedHistory();
   sheet.getRange(1, 6).setValue('last_delivery_run');
   const byUrl = new Map();
+  const activeEnquiries = new Set(batch.cards.filter(card => card.draft).map(card => card.job_url));
   rows.forEach((row, index) => {
+    if (row[1]?.endsWith('/#outreach-enquiry') && row[3] === 'pending' &&
+        (row[2] === 'open' || row[2] === 'paused')) {
+      const nextStatus = activeEnquiries.has(row[1]) ? 'open' : 'paused';
+      if (row[2] !== nextStatus) {
+        sheet.getRange(index + 2, 3).setValue(nextStatus);
+        row[2] = nextStatus;
+      }
+    }
     if (!byUrl.has(row[1])) byUrl.set(row[1], []);
     byUrl.get(row[1]).push({values: row, number: index + 2});
   });
+  SpreadsheetApp.flush();
   let sent = 0;
+  let resume;
   const seen = new Set();
   for (const card of batch.cards) {
     if (seen.has(card.job_url)) continue;
@@ -246,13 +368,29 @@ function publishHostedCards(batch) {
     const matches = byUrl.get(card.job_url) || [];
     if (matches.some(row => ['skipped', 'applied'].includes(row.values[2]) ||
         String(row.values[5]) === batch.run_id)) continue;
+    if (card.draft && (
+      matches.some(row => row.values[3] && row.values[3] !== 'pending') ||
+      rows.some(row => ['sent', 'sending', 'uncertain'].includes(row[3]) &&
+        row[4] && JSON.parse(row[4]).recipient === card.draft.recipient)
+    )) continue;
     if (sent >= 30) break;
     let rowNumber = matches[0]?.number;
     if (!rowNumber) {
-      sheet.appendRow(['', card.job_url, 'open', '', '', '']);
+      sheet.appendRow(['', card.job_url, 'open', card.draft ? 'pending' : '',
+        card.draft ? JSON.stringify(card.draft) : '', '']);
       rowNumber = sheet.getLastRow();
     }
     if (sent) Utilities.sleep(1100);
+    if (card.draft) {
+      resume = resume || resumeAttachment(config.fileId);
+      const draft = matches[0]?.values[4] ? JSON.parse(matches[0].values[4]) : card.draft;
+      if (draft.recipient !== card.draft.recipient || !validHostedDraft(draft)) continue;
+      sendHostedMailCard(config, card.job_url, draft, resume);
+      sheet.getRange(rowNumber, 6).setValue(batch.run_id);
+      SpreadsheetApp.flush();
+      sent++;
+      continue;
+    }
     const key = jobKey(card.job_url);
     telegram(config, 'sendMessage', {
       chat_id: config.chatId,

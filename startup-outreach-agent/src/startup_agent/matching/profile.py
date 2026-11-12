@@ -78,7 +78,7 @@ class CandidatePreferences:
     exclude_seniority: List[str] = field(default_factory=list)
     strict_fresher_only: bool = True
     max_required_experience_years: int = 2
-    small_startup_max_employees: int = 100
+    small_startup_max_employees: int = 200
     allow_unknown_company_size: bool = False
 
 

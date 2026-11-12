@@ -18,7 +18,7 @@ python run.py --match
 python run.py --digest-preview
 ```
 
-Discovery reads the enabled sources in [sources.yaml](startup-outreach-agent/config/sources.yaml). Matching uses the [candidate profile](startup-outreach-agent/config/candidate_profile.yaml), including the 100-employee ceiling. Reviewed company sizes and hiring addresses live in the application's `config/` directory.
+Discovery reads the enabled sources in [sources.yaml](startup-outreach-agent/config/sources.yaml). Matching uses the [candidate profile](startup-outreach-agent/config/candidate_profile.yaml), including the 200-employee ceiling. Reviewed company sizes and hiring addresses live in the application's `config/` directory.
 
 ## Telegram and email
 

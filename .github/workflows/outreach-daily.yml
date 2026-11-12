@@ -3,7 +3,7 @@ name: Outreach daily discovery
 on:
   workflow_dispatch:
   schedule:
-    - cron: '45 3 * * *'
+    - cron: '45 3,12 * * *' # 9:15 AM and 6:15 PM IST
 
 permissions:
   contents: read

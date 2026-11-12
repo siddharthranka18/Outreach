@@ -18,4 +18,8 @@ The existing Apps Script project owns the private Sheet and Telegram bot. GitHub
 3. Under **Variables**, create `OUTREACH_HOSTED_ENABLED` with value `true`.
 4. Go to **Actions → Outreach daily discovery → Run workflow**. Check the workflow log and Telegram. Use a hosted card to test a Skip or Mark Applied action you want to keep, then wait for the bot confirmation and check the Sheet.
 
-The schedule is **9:15 AM IST** daily. GitHub can delay scheduled runs. A run posts up to 30 cards. Unhandled jobs can reappear on the next run while they match. Job actions on old local cards and employer draft approval buttons still belong to the local workflow. The hosted trigger only handles hosted job cards and the Gmail self-test.
+The schedule runs daily at **9:15 AM and 6:15 PM IST**. GitHub can delay scheduled runs. A run posts up to 30 cards, with job cards before cold enquiries. Unhandled jobs can reappear on the next run while they match.
+
+Cold enquiries use reviewed entries in `config/hiring_contacts.yaml` with `accepts_enquiries: true`. The daily run checks that the employer still publishes the email, the employer fits the size limit, and there is no matching opening in that run. The bot stores the draft in the private Sheet and shows **Edit**, **Approve & Send**, and **Skip**. Reply to the edit prompt with the subject first and the body below it. **Approve & Send** sends the reviewed draft with the private Drive resume. An existing send or uncertain delivery to the same inbox prevents another cold enquiry.
+
+After replacing the script, update the existing web app deployment to a new version. Keep the existing `pollHostedReview` trigger. Old local job and email buttons require the local listener, so use only new hosted cards while the hosted trigger is active.
