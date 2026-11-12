@@ -1,6 +1,7 @@
 """Application entry point and CLI for Startup Job Outreach Agent."""
 
 import argparse
+from pathlib import Path
 import sys
 from typing import List, Optional
 from sqlalchemy import text
@@ -11,6 +12,8 @@ from startup_agent.database.engine import create_db_engine
 from startup_agent.database.models import EmailDraftModel
 from startup_agent.database.session import create_session_factory
 from startup_agent.digest import format_digest
+from startup_agent.hosted_state import export_hosted_state
+from startup_agent.hosted_delivery import publish_hosted_shortlist
 from startup_agent.discovery.funding_leads import print_funding_leads
 from startup_agent.email_drafts import EmailDraft, format_email_draft, generate_email_draft, generate_llm_email_draft
 from startup_agent.discovery.pipeline import DiscoverySummary, run_discovery_pipeline
@@ -192,6 +195,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--telegram-email-card-preview", type=int, metavar="JOB_ID", help="Show a read-only approval card in Telegram.")
     parser.add_argument("--telegram-poll", action="store_true", help="Listen for Telegram job actions.")
     parser.add_argument("--funding-leads", action="store_true", help="Preview recent Indian startup funding leads.")
+    parser.add_argument("--hosted-export", type=Path, metavar="FILE", help="Export private job and draft history for hosted migration.")
+    parser.add_argument("--hosted-daily", action="store_true", help="Discover jobs and publish the shortlist through Apps Script.")
 
     cli_args = argv if argv is not None else []
     args = parser.parse_args(cli_args)
@@ -207,6 +212,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             print_funding_leads(reviewed)
             return 0
         settings = initialize_app()
+
+        if args.hosted_export is not None:
+            session_factory = create_session_factory(create_db_engine(settings.database_url))
+            with session_factory() as session:
+                count = export_hosted_state(session, args.hosted_export)
+            print(f"Exported {count} job history records to {args.hosted_export}. Keep this file private.")
+            return 0
 
         if args.telegram_email_approve is not None or args.telegram_email_card_preview is not None:
             preview = args.telegram_email_card_preview is not None
@@ -266,7 +278,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"Private chat ID: {chat_id}")
             return 0
 
-        if args.discover or args.telegram_daily:
+        if args.discover or args.telegram_daily or args.hosted_daily:
             print("\n>>> Launching multi-source discovery pipeline...")
             summary = run_discovery_pipeline(settings=settings)
             print_discovery_report(summary)
@@ -274,11 +286,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             if summary.all_failed:
                 print("ERROR: All attempted discovery sources failed.", file=sys.stderr)
                 return 1
-            if args.telegram_daily:
+            if args.telegram_daily or args.hosted_daily:
                 session_factory = create_session_factory(create_db_engine(settings.database_url))
                 with session_factory() as session:
-                    routes = build_outreach_routes(session, settings)
-                count = send_job_cards(routes)
+                    if args.hosted_daily:
+                        count = publish_hosted_shortlist(session, settings)
+                    else:
+                        count = send_job_cards(build_outreach_routes(session, settings))
                 print(f"Telegram confirmed {count} review card(s).")
             return 0
 
