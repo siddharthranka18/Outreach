@@ -44,6 +44,28 @@ def cold_enquiry_cards(session: Session, settings: Settings, companies_with_matc
     client = HttpClient()
     cards = []
     seen_domains = set()
+    for domain, employer in reviewed.items():
+        if employer.get("enquiry_form") is not True:
+            continue
+        company_name = employer["company_name"]
+        url = employer["careers_url"]
+        if normalize_name(company_name) in companies_with_matches:
+            continue
+        if size_filter.evaluate(employer.get("employee_count")).status != StartupEligibilityStatus.ELIGIBLE:
+            continue
+        if not url.startswith("https://") or normalize_website(url).split("/", 1)[0] != domain:
+            continue
+        try:
+            page = client.get(url)
+        except httpx.HTTPError:
+            continue
+        if not page.is_success or normalize_website(str(page.url)).split("/", 1)[0] != domain:
+            continue
+        cards.append({
+            "job_url": f"https://{domain}/#outreach-enquiry-form",
+            "text": f"Internship enquiry @ {company_name}\nGeneral careers form\n{url}",
+        })
+        seen_domains.add(domain)
     for entry in [*contacts.values(), *employer_contacts]:
         if entry.get("accepts_enquiries") is not True:
             continue

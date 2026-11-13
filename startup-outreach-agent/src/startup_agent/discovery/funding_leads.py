@@ -56,8 +56,8 @@ def print_funding_leads(reviewed_companies: dict, *, portfolio_companies: list[d
             print("  Employer domain, size, and openings need review.")
     print(f"\n{len(seen)} funding leads from the past 30 days.")
     if portfolio_companies:
-        print("\nReviewed portfolio employers")
+        print("\nReviewed startup directory and portfolio leads")
         for company in portfolio_companies:
             print(f"  {company['company_name']} | {company['employee_count']} employees")
-            print(f"    Portfolio: {company['discovery_url']}")
+            print(f"    Discovery source: {company['discovery_url']}")
             print(f"    Careers: {company['careers_url']}")

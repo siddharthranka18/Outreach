@@ -1,4 +1,12 @@
 # Publicly reported employee bands, keyed by the employer's official domain.
+airbound.com:
+  company_name: Airbound
+  employee_count: "51-200"
+  source_url: https://in.linkedin.com/company/airbound-co
+  checked_on: 2026-11-12
+  discovery_url: https://startups.gallery/companies/airbound
+  careers_url: https://www.airbound.com/careers
+  enquiry_form: true
 stance.health:
   company_name: Stance Health
   employee_count: "11-50"
