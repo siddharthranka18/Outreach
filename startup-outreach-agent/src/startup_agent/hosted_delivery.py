@@ -188,23 +188,17 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
                for node in page.select("h2, h3, h4, a[href], button")):
             continue
         recipient = hiring_email(page, domain, lead.get("hiring_email", "").lower())
+        if not recipient:
+            continue
         description = page.select_one('meta[name="description"], meta[property="og:description"]')
         context = lead.get("enquiry_interest") or (description.get("content", "") if description else "")
         context = " ".join(context.split())[:350]
         role = next((role for role, pattern in PROJECT_ROLES.items()
                      if re.search(pattern, context, re.I)), "full_stack")
-        form = next((
-            urljoin(source, link["href"]) for link in page.select("a[href]")
-            if re.search(r"\b(?:general application|open application|speculative application|"
-                         r"internship enquiry|submit your resume)\b", link.get_text(" ", strip=True), re.I)
-            and employer_domain(urljoin(source, link["href"])) == domain
-        ), None)
-        if recipient or lead.get("enquiry_form") is True or (form and TECH_ROLE.search(context)):
-            candidates.append({
-                "domain": domain, "name": name, "source": source, "recipient": recipient,
-                "context": context, "role": role,
-                "form": form or (source if lead.get("enquiry_form") is True else None),
-            })
+        candidates.append({
+            "domain": domain, "name": name, "source": source, "recipient": recipient,
+            "context": context, "role": role,
+        })
     return candidates
 
 
@@ -219,17 +213,13 @@ def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
     cards = []
     for lead in candidates:
         name, domain, recipient = (lead[key] for key in ("name", "domain", "recipient"))
-        if normalize_name(name) in companies_with_matches or domain in companies_with_matches:
+        if not recipient or normalize_name(name) in companies_with_matches or domain in companies_with_matches:
             continue
         mail_url = f"https://{domain}/#outreach-enquiry"
         form_url = f"{mail_url}-form"
         if any(saved.get(url, {}).get("status") in {"skipped", "applied"} for url in (mail_url, form_url)):
             continue
         text = f"Internship enquiry @ {name}"
-        if not recipient:
-            if lead["form"]:
-                cards.append({"job_url": form_url, "text": f"{text}\nGeneral careers form\n{lead['form']}"})
-            continue
         entry = saved.get(mail_url, {})
         if recipient in blocked_recipients or entry.get("delivery") not in {None, "", "pending"}:
             continue
@@ -270,7 +260,7 @@ def hosted_request(endpoint: str, secret: str, run_id: str, cards: list[dict]) -
     return result
 
 
-def publish_hosted_shortlist(session: Session, settings: Settings) -> int:
+def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_only: bool = False) -> int:
     endpoint = os.getenv("OUTREACH_WEB_APP_URL", "").strip()
     secret = os.getenv("OUTREACH_SYNC_SECRET", "").strip()
     run_id = os.getenv("GITHUB_RUN_ID") or f"local-{time.time_ns()}"
@@ -293,7 +283,8 @@ def publish_hosted_shortlist(session: Session, settings: Settings) -> int:
         matching_companies.update((company.normalized_name, employer_domain(company.website)))
     enquiries = cold_enquiry_cards(candidates, profile, matching_companies, history)
     # Leave room in the 30-card Telegram delivery limit for enquiries.
-    cards = [*cards[:20], *enquiries, *cards[20:]][:100]
+    cards = (enquiries if enquiries_only else [*cards[:20], *enquiries, *cards[20:]])[:100]
+    logger.info("Prepared %d email enquiry card(s) for hosted review.", len(enquiries))
     result = hosted_request(endpoint, secret, run_id, cards)
     if type(result.get("sent")) is not int:
         raise RuntimeError("Apps Script did not confirm the Telegram delivery count.")

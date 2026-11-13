@@ -197,9 +197,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--funding-leads", action="store_true", help="Preview recent Indian startup funding leads.")
     parser.add_argument("--hosted-export", type=Path, metavar="FILE", help="Export private job and draft history for hosted migration.")
     parser.add_argument("--hosted-daily", action="store_true", help="Discover jobs and publish the shortlist through Apps Script.")
+    parser.add_argument("--hosted-enquiries-only", action="store_true", help="With --hosted-daily, publish only email enquiry cards.")
 
     cli_args = argv if argv is not None else []
     args = parser.parse_args(cli_args)
+    if args.hosted_enquiries_only and not args.hosted_daily:
+        parser.error("--hosted-enquiries-only requires --hosted-daily")
 
     try:
         if args.funding_leads:
@@ -293,7 +296,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 session_factory = create_session_factory(create_db_engine(settings.database_url))
                 with session_factory() as session:
                     if args.hosted_daily:
-                        count = publish_hosted_shortlist(session, settings)
+                        count = publish_hosted_shortlist(session, settings, enquiries_only=args.hosted_enquiries_only)
                     else:
                         count = send_job_cards(build_outreach_routes(session, settings))
                 print(f"Telegram confirmed {count} review card(s).")

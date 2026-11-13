@@ -38,7 +38,7 @@ On a live review card, **Edit** opens a reply prompt. Put the subject on the fir
 
 ## Hosted Telegram digest
 
-The hosted workflow checks reviewed companies, existing discovery results, and a sample of the Startups Gallery India directory for hiring contacts and public ATS openings. Matching roles get application cards. An eligible company with a published hiring inbox can get an enquiry draft, and a general careers form can be shown when available.
+The hosted workflow checks reviewed companies, existing discovery results, and a sample of the Startups Gallery India directory for hiring contacts and public ATS openings. Matching roles get application cards. Enquiry cards require a published hiring email and an email draft.
 
 To enable the hosted enquiry flow, update `Code.gs` in the existing Apps Script project and deploy a new version of the existing web app. Add `GEMINI_API_KEY` under **Settings → Secrets and variables → Actions → Secrets** in GitHub, then run **Outreach daily discovery** from the Actions tab. The workflow generates up to five new drafts per run and reuses saved drafts and Telegram edits from the private sheet. Gmail sends only after **Approve & Send**.
 

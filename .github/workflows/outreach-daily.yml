@@ -2,6 +2,11 @@ name: Outreach daily discovery
 
 on:
   workflow_dispatch:
+    inputs:
+      enquiries_only:
+        description: Send only email enquiry cards
+        type: boolean
+        default: false
   schedule:
     - cron: '15 9 * * *'
       timezone: Asia/Kolkata
@@ -52,9 +57,14 @@ jobs:
               exit 0
             fi
           fi
-          python run.py --hosted-daily
+          if [[ "$ENQUIRIES_ONLY" == true ]]; then
+            python run.py --hosted-daily --hosted-enquiries-only
+          else
+            python run.py --hosted-daily
+          fi
         env:
           DIGEST_SCHEDULE: ${{ github.event.schedule }}
+          ENQUIRIES_ONLY: ${{ inputs.enquiries_only }}
           OUTREACH_WEB_APP_URL: ${{ secrets.OUTREACH_WEB_APP_URL }}
           OUTREACH_SYNC_SECRET: ${{ secrets.OUTREACH_SYNC_SECRET }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

@@ -14,7 +14,6 @@ LEAD = {
     "recipient": "jobs@tiny.example",
     "context": "We build developer tools.",
     "role": "backend",
-    "form": None,
 }
 URL = "https://tiny.example/#outreach-enquiry"
 
@@ -48,10 +47,10 @@ def test_hosted_enquiry_generates_once_then_reuses_edit(monkeypatch):
         draft.assert_called_once()
 
 
-def test_hosted_enquiry_shows_form_without_gemini(monkeypatch):
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    form = "https://tiny.example/careers/general-application"
-    cards = cold_enquiry_cards(
-        [{**LEAD, "recipient": None, "form": form}], CandidateProfile.load(), set(), [],
-    )
-    assert cards == [{"job_url": f"{URL}-form", "text": f"Internship enquiry @ Tiny Studio\nGeneral careers form\n{form}"}]
+def test_hosted_enquiry_requires_a_hiring_email(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    with patch("startup_agent.hosted_delivery.generate_email_draft") as draft:
+        assert cold_enquiry_cards(
+            [{**LEAD, "recipient": None}], CandidateProfile.load(), set(), [],
+        ) == []
+        draft.assert_not_called()
