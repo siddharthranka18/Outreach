@@ -36,4 +36,10 @@ Put local credentials in `startup-outreach-agent/.env`. Use `TELEGRAM_BOT_TOKEN`
 
 On a live review card, **Edit** opens a reply prompt. Put the subject on the first line and the body below it. **Approve & Send** sends the reviewed email through Gmail with the configured resume PDF.
 
+## Hosted Telegram digest
+
+The hosted workflow checks reviewed companies, existing discovery results, and a sample of the Startups Gallery India directory for hiring contacts and public ATS openings. Matching roles get application cards. An eligible company with a published hiring inbox can get an enquiry draft, and a general careers form can be shown when available.
+
+To enable the hosted enquiry flow, update `Code.gs` in the existing Apps Script project and deploy a new version of the existing web app. Add `GEMINI_API_KEY` under **Settings → Secrets and variables → Actions → Secrets** in GitHub, then run **Outreach daily discovery** from the Actions tab. The workflow generates up to five new drafts per run and reuses saved drafts and Telegram edits from the private sheet. Gmail sends only after **Approve & Send**.
+
 Run the tests from `startup-outreach-agent/` with `python -m pytest -q`.

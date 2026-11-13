@@ -86,7 +86,9 @@ def generate_llm_email_draft(route: OutreachRoute, profile: CandidateProfile) ->
     return generate_email_draft(route, profile).preview()
 
 
-def generate_email_draft(route: OutreachRoute, profile: CandidateProfile) -> EmailDraft:
+def generate_email_draft(
+    route: OutreachRoute, profile: CandidateProfile, *, enquiry_context: str | None = None,
+) -> EmailDraft:
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         raise ValueError("Set GEMINI_API_KEY in your local .env to use the LLM preview.")
@@ -96,6 +98,14 @@ def generate_email_draft(route: OutreachRoute, profile: CandidateProfile) -> Ema
         "matched_resume_skills": route.matching_skills,
         "approved_evidence": _draft_evidence(route, profile).strip(),
     }
+    enquiry_instruction = ""
+    if enquiry_context is not None:
+        facts["published_company_context"] = enquiry_context
+        enquiry_instruction = (
+            " Ask whether the engineering team accepts internship enquiries. "
+            "There is no confirmed matching opening. Use a specific company detail only "
+            "when supported by published_company_context. The sender will attach their resume."
+        )
     try:
         response = httpx.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
@@ -120,6 +130,7 @@ def generate_email_draft(route: OutreachRoute, profile: CandidateProfile) -> Ema
                         "connect it to the role using supported facts. Mention internship experience "
                         "only if included in approved_evidence. Never invent company details, "
                         "skills, attachments, or an application already submitted. No links."
+                        + enquiry_instruction
                     )}],
                 },
                 "contents": [{"role": "user", "parts": [{"text": json.dumps(facts)}]}],

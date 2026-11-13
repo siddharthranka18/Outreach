@@ -248,6 +248,15 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
             )
         return jobs
 
+    def fetch_board_jobs(self, target: Dict[str, str]) -> List[Job]:
+        fetch = {
+            "greenhouse": self._discover_greenhouse,
+            "ashby": self._discover_ashby,
+            "lever": self._discover_lever,
+            "recruitee": self._discover_recruitee,
+        }
+        return fetch[target["platform"].lower()](target)
+
     def discover(self) -> DiscoveryResult:
         """Run discovery across all configured ATS board endpoints."""
         if not self.is_enabled():
@@ -284,18 +293,7 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
                 seen_companies.add(website)
 
             try:
-                if platform == "greenhouse":
-                    target_jobs = self._discover_greenhouse(target)
-                elif platform == "ashby":
-                    target_jobs = self._discover_ashby(target)
-                elif platform == "lever":
-                    target_jobs = self._discover_lever(target)
-                elif platform == "recruitee":
-                    target_jobs = self._discover_recruitee(target)
-                else:
-                    logger.warning("Unsupported ATS platform: %s", platform)
-                    continue
-
+                target_jobs = self.fetch_board_jobs(target)
                 jobs.extend(target_jobs)
                 logger.info("Discovered %d jobs for %s via %s", len(target_jobs), company_name, platform)
             except Exception as exc:

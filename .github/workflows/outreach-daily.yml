@@ -57,3 +57,4 @@ jobs:
           DIGEST_SCHEDULE: ${{ github.event.schedule }}
           OUTREACH_WEB_APP_URL: ${{ secrets.OUTREACH_WEB_APP_URL }}
           OUTREACH_SYNC_SECRET: ${{ secrets.OUTREACH_SYNC_SECRET }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

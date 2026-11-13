@@ -225,7 +225,11 @@ function verifiedShortlist(event) {
   }
   if (mismatch) throw new Error('Invalid hosted request signature.');
   const batch = JSON.parse(payload);
-  if (!Number.isSafeInteger(batch.timestamp) || Math.abs(Date.now() / 1000 - batch.timestamp) > 600 ||
+  if (!Number.isSafeInteger(batch.timestamp) || Math.abs(Date.now() / 1000 - batch.timestamp) > 600) {
+    throw new Error('Invalid hosted request timestamp.');
+  }
+  if (batch.run_id === 'enquiry-history' && Array.isArray(batch.cards) && !batch.cards.length) return batch;
+  if (
       !/^(?:local-)?\d{1,24}$/.test(batch.run_id || '') ||
       !Array.isArray(batch.cards) || batch.cards.length > 100 ||
       batch.cards.some(card => typeof card?.text !== 'string' || !card.text || card.text.length > 4000 ||
@@ -383,8 +387,13 @@ function publishHostedCards(batch) {
     if (sent) Utilities.sleep(1100);
     if (card.draft) {
       resume = resume || resumeAttachment(config.fileId);
-      const draft = matches[0]?.values[4] ? JSON.parse(matches[0].values[4]) : card.draft;
-      if (draft.recipient !== card.draft.recipient || !validHostedDraft(draft)) continue;
+      const saved = matches[0]?.values[4] ? JSON.parse(matches[0].values[4]) : null;
+      const draft = saved?.recipient === card.draft.recipient ? {...saved, source_url: card.draft.source_url} : card.draft;
+      if (!validHostedDraft(draft)) continue;
+      if (saved && JSON.stringify(saved) !== JSON.stringify(draft)) {
+        sheet.getRange(rowNumber, 5).setValue(JSON.stringify(draft));
+        SpreadsheetApp.flush();
+      }
       sendHostedMailCard(config, card.job_url, draft, resume);
       sheet.getRange(rowNumber, 6).setValue(batch.run_id);
       SpreadsheetApp.flush();
@@ -415,7 +424,17 @@ function doPost(event) {
     const lock = LockService.getScriptLock();
     lock.waitLock(30000);
     try {
-      result = {ok: true, sent: publishHostedCards(batch)};
+      if (batch.run_id === 'enquiry-history') {
+        const {rows} = hostedHistory();
+        const entries = rows.filter(row => typeof row[1] === 'string' &&
+          /\/#outreach-enquiry(?:-form)?$/.test(row[1])).map(row => ({
+          url: row[1], status: row[2], delivery: row[3],
+          draft: row[4] ? JSON.parse(row[4]) : null,
+        }));
+        result = {ok: true, entries};
+      } else {
+        result = {ok: true, sent: publishHostedCards(batch)};
+      }
     } finally {
       lock.releaseLock();
     }
