@@ -16,6 +16,7 @@ from startup_agent.discovery.andhra_startup_map import AndhraStartupMapDiscovery
 from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
 from startup_agent.discovery.hasjob import HasjobDiscoverySource
 from startup_agent.discovery.himalayas import HimalayasDiscoverySource
+from startup_agent.discovery.remotive import RemotiveDiscoverySource
 from startup_agent.discovery.venomics import VenomicsDiscoverySource
 from startup_agent.discovery.reviewed_careers import ReviewedCareersDiscoverySource
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
@@ -38,6 +39,7 @@ SOURCE_ADAPTER_REGISTRY: Dict[str, Type[BaseDiscoverySource]] = {
     "andhra_startup_map": AndhraStartupMapDiscoverySource,
     "hasjob": HasjobDiscoverySource,
     "himalayas": HimalayasDiscoverySource,
+    "remotive": RemotiveDiscoverySource,
     "venomics_careers": VenomicsDiscoverySource,
     "reviewed_careers": ReviewedCareersDiscoverySource,
     "y_combinator": YCombinatorDiscoverySource,
@@ -119,13 +121,20 @@ class DiscoveryPipeline:
             if not src.enabled:
                 continue
             adapter_cls = SOURCE_ADAPTER_REGISTRY.get(src.name)
-            if adapter_cls is HimalayasDiscoverySource:
-                employers = {
-                    evidence["himalayas_slug"]: (domain, evidence)
-                    for domain, evidence in self.size_evidence.items()
-                    if evidence.get("himalayas_slug")
-                }
-                adapters.append(HimalayasDiscoverySource(employers, name=src.name))
+            if adapter_cls in (HimalayasDiscoverySource, RemotiveDiscoverySource):
+                reviewed = [
+                    (domain, evidence) for domain, evidence in self.size_evidence.items()
+                    if self.startup_filter.evaluate(evidence.get("employee_count")).status
+                    == StartupEligibilityStatus.ELIGIBLE
+                ]
+                by_name = {normalize_name(evidence["company_name"]): (domain, evidence)
+                           for domain, evidence in reviewed if evidence.get("company_name")}
+                if adapter_cls is HimalayasDiscoverySource:
+                    by_slug = {evidence["himalayas_slug"]: (domain, evidence)
+                               for domain, evidence in reviewed if evidence.get("himalayas_slug")}
+                    adapters.append(HimalayasDiscoverySource(by_slug, name=src.name, employers_by_name=by_name))
+                else:
+                    adapters.append(RemotiveDiscoverySource(by_name, name=src.name))
             elif adapter_cls is DirectAtsDiscoverySource:
                 targets = []
                 for domain, evidence in self.size_evidence.items():

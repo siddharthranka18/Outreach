@@ -20,6 +20,10 @@ python run.py --digest-preview
 
 Discovery reads the enabled sources in [sources.yaml](startup-outreach-agent/config/sources.yaml). Matching uses the [candidate profile](startup-outreach-agent/config/candidate_profile.yaml), including the 200-employee ceiling. Reviewed company sizes and hiring addresses live in the application's `config/` directory.
 
+### Discover more employer boards
+
+Use Entrackr funding reports, Remote Rocketship, Working Nomads, or searches such as `site:jobs.lever.co "engineering intern" "India"` to find leads. Confirm the employer, its published size, and the role's location on the live listing. Add the employer's domain, size evidence, and public ATS board URL to [company_sizes.yaml](startup-outreach-agent/config/company_sizes.yaml) so discovery can check the board automatically. For remote roles, check that the listing explicitly allows applicants in India.
+
 ## Telegram and email
 
 Put local credentials in `startup-outreach-agent/.env`. Use `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for your private Telegram chat. Use `GEMINI_API_KEY` for AI draft generation, and set `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, and `OUTREACH_RESUME_PATH` for employer emails. Point the resume setting to a local PDF using a filesystem path.

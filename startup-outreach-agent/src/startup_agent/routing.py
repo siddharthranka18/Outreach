@@ -38,6 +38,7 @@ class OutreachRoute:
     matching_skills: tuple[str, ...] = ()
     category: str = ""
     asks_for_internship: bool = False
+    source_label: str = ""
 
 
 def _public_link(value: str | None) -> str | None:
@@ -108,6 +109,7 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
             relevant_projects=tuple(match.relevant_projects),
             matching_skills=tuple(match.matching_skills),
             category=match.category,
+            source_label={"remotive": "Remotive", "himalayas": "Himalayas"}.get(job.source_name, ""),
             asks_for_internship=bool(re.search(
                 r"\b(?:prior|previous|completed)\b[^.!?\n]{0,50}\binternship\b"
                 r"|\binternship experience\b",

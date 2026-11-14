@@ -23,5 +23,6 @@ def format_digest(routes: Iterable[OutreachRoute]) -> str:
             location += " (confirm with employer)"
         if route.match_score is not None:
             location += f" · Match {route.match_score:g}/100"
-        entries.append(f"{index}. {title} @ {company}\n{location}\nApply: {route.url}")
+        source = f"\nSource: {route.source_label}" if route.source_label else ""
+        entries.append(f"{index}. {title} @ {company}\n{location}\nApply: {route.url}{source}")
     return "\n\n".join([heading, *entries])

@@ -45,6 +45,36 @@ enterpret.com:
   source_url: https://www.linkedin.com/company/enterpret
   checked_on: 2026-11-10
   ats_url: https://job-boards.greenhouse.io/enterpret
+drivetrain.ai:
+  company_name: Drivetrain
+  employee_count: "51-200"
+  source_url: https://www.linkedin.com/company/drivetrainai/
+  checked_on: 2026-11-14
+  ats_url: https://jobs.lever.co/drivetrain
+karya.in:
+  company_name: Karya
+  employee_count: "51-200"
+  source_url: https://in.linkedin.com/company/karya-inc
+  checked_on: 2026-11-14
+  ats_url: https://job-boards.greenhouse.io/karya
+merklescience.com:
+  company_name: Merkle Science
+  employee_count: "51-200"
+  source_url: https://www.linkedin.com/company/merklescience/
+  checked_on: 2026-11-14
+  ats_url: https://jobs.lever.co/merklescience
+jobtwine.com:
+  company_name: JobTwine
+  employee_count: "11-50"
+  source_url: https://www.linkedin.com/company/jobtwine
+  checked_on: 2026-11-14
+  ats_url: https://jobs.lever.co/jobtwine
+merakilabs.com:
+  company_name: Meraki Labs
+  employee_count: "2-10"
+  source_url: https://in.linkedin.com/company/merakilabsindia
+  checked_on: 2026-11-14
+  ats_url: https://jobs.ashbyhq.com/Meraki-Labs
 hevodata.com:
   employee_count: "201-500"
   source_url: https://www.linkedin.com/company/hevodata

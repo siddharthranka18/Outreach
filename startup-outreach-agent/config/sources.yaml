@@ -17,7 +17,14 @@ sources:
     display_name: "Himalayas"
     type: "public_jobs_api"
     enabled: true
-    description: "Remote technical internships open to India from employers with reviewed domains."
+    description: "Remote technical internships and entry-level roles open to India from size-reviewed employers."
+
+  - name: "remotive"
+    display_name: "Remotive"
+    type: "public_jobs_api"
+    url: "https://remotive.com/api/remote-jobs"
+    enabled: false
+    description: "Trial source for India-eligible technical fresher roles at size-reviewed employers."
 
   - name: "hasjob"
     display_name: "Hasjob"
