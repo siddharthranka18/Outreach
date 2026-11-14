@@ -8,10 +8,8 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: '15 9 * * *'
-      timezone: Asia/Kolkata
-    - cron: '15 18 * * *'
-      timezone: Asia/Kolkata
+    - cron: '45 3 * * *' # 09:15 IST
+    - cron: '45 12 * * *' # 18:15 IST
 
 permissions:
   contents: read
@@ -47,8 +45,8 @@ jobs:
         run: |
           if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
             case "$DIGEST_SCHEDULE" in
-              '15 9 * * *') first=0915; last=0945 ;;
-              '15 18 * * *') first=1815; last=1845 ;;
+              '45 3 * * *') first=0915; last=0945 ;;
+              '45 12 * * *') first=1815; last=1845 ;;
               *) echo "Unrecognized digest schedule."; exit 1 ;;
             esac
             now=$(TZ=Asia/Kolkata date +%H%M)
