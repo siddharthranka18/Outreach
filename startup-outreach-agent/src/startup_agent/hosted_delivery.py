@@ -263,7 +263,7 @@ def hosted_request(endpoint: str, secret: str, run_id: str, cards: list[dict]) -
 def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_only: bool = False) -> int:
     endpoint = os.getenv("OUTREACH_WEB_APP_URL", "").strip()
     secret = os.getenv("OUTREACH_SYNC_SECRET", "").strip()
-    run_id = os.getenv("GITHUB_RUN_ID") or f"local-{time.time_ns()}"
+    run_id = os.getenv("OUTREACH_DELIVERY_SLOT") or os.getenv("GITHUB_RUN_ID") or f"local-{time.time_ns()}"
     if not re.fullmatch(r"https://script\.google\.com/macros/s/[\w-]+/exec", endpoint) or len(secret) < 32:
         raise ValueError("Set OUTREACH_WEB_APP_URL and an OUTREACH_SYNC_SECRET of at least 32 characters.")
 
