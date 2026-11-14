@@ -2,6 +2,8 @@ const SUBJECT = 'Outreach Agent hosted Gmail test';
 const BODY = 'This test was approved in Telegram and sent by Google Apps Script. Your resume is attached.';
 const TEST_KEY = 'HOSTED_TEST';
 const OFFSET_KEY = 'HOSTED_TEST_OFFSET';
+const WEBHOOK_KEY = 'OUTREACH_TELEGRAM_WEBHOOK_SECRET';
+const WEBHOOK_UPDATE_KEY = 'OUTREACH_TELEGRAM_LAST_UPDATE';
 
 function settings() {
   const properties = PropertiesService.getScriptProperties();
@@ -118,34 +120,7 @@ function pollTelegram(reviewEnabled) {
       update => (update.callback_query?.data || '').startsWith('hosted-test:'),
     ).length} hosted test tap(s).`);
     for (const update of updates) {
-      const callback = update.callback_query;
-      const data = callback?.data || '';
-      if (data.startsWith('hosted-test:') || (reviewEnabled && /^hosted-(job|mail):/.test(data))) {
-        let feedback;
-        try {
-          if (data.startsWith('hosted-mail:')) {
-            feedback = handleHostedMail(config, callback);
-          } else {
-            feedback = data.startsWith('hosted-job:')
-              ? handleHostedJobAction(config, callback) : handleTestApproval(config, callback);
-          }
-        } catch (_) {
-          feedback = 'The action could not be completed. Check Apps Script Executions.';
-        }
-        console.log(feedback || 'Ignored a tap outside the configured private chat.');
-        if (feedback) {
-          try {
-            telegram(config, 'answerCallbackQuery', {callback_query_id: callback.id, text: feedback});
-          } catch (_) {
-            // The button acknowledgement can expire before the scheduled poll.
-          }
-          if (String(callback.from.id) === config.chatId) {
-            telegram(config, 'sendMessage', {chat_id: config.chatId, text: feedback});
-          }
-        }
-      } else if (reviewEnabled && update.message) {
-        handleHostedMailEdit(config, update.message);
-      }
+      handleTelegramUpdate(config, update, reviewEnabled);
       config.properties.setProperty(OFFSET_KEY, String(update.update_id + 1));
     }
     const test = JSON.parse(config.properties.getProperty(TEST_KEY) || 'null');
@@ -153,6 +128,109 @@ function pollTelegram(reviewEnabled) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function handleTelegramUpdate(config, update, reviewEnabled, acknowledged = false) {
+  const callback = update.callback_query;
+  const data = callback?.data || '';
+  if (data.startsWith('hosted-test:') || (reviewEnabled && /^hosted-(job|mail):/.test(data))) {
+    let feedback;
+    try {
+      if (data.startsWith('hosted-mail:')) {
+        feedback = handleHostedMail(config, callback);
+      } else {
+        feedback = data.startsWith('hosted-job:')
+          ? handleHostedJobAction(config, callback) : handleTestApproval(config, callback);
+      }
+    } catch (_) {
+      feedback = 'The action could not be completed. Check Apps Script Executions.';
+    }
+    console.log(feedback || 'Ignored a tap outside the configured private chat.');
+    if (feedback) {
+      try {
+        if (!acknowledged) telegram(config, 'answerCallbackQuery', {callback_query_id: callback.id, text: feedback});
+      } catch (_) {
+        // The button acknowledgement can expire before the scheduled poll.
+      }
+      if (String(callback.from.id) === config.chatId) {
+        telegram(config, 'sendMessage', {chat_id: config.chatId, text: feedback});
+      }
+    }
+  } else if (reviewEnabled && update.message) {
+    handleHostedMailEdit(config, update.message);
+  }
+}
+
+function installHostedReviewWebhook() {
+  const config = settings();
+  hostedHistory();
+  const url = config.properties.getProperty('OUTREACH_WEB_APP_URL') || '';
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) {
+    throw new Error('Set OUTREACH_WEB_APP_URL to the existing web app /exec URL in Script Properties.');
+  }
+  const secret = config.properties.getProperty(WEBHOOK_KEY) || Utilities.getUuid() + Utilities.getUuid();
+  config.properties.setProperty(WEBHOOK_KEY, secret);
+  const probe = UrlFetchApp.fetch(`${url}?telegram_probe=1`, {
+    method: 'post', followRedirects: false, muteHttpExceptions: true,
+  });
+  if (probe.getResponseCode() !== 200 || !probe.getContentText().includes('outreach-webhook-ready')) {
+    throw new Error(`Webhook preflight failed (HTTP ${probe.getResponseCode()}). Deploy the updated web app version and try again.`);
+  }
+  telegram(config, 'setWebhook', {
+    url: `${url}?telegram_hook=${secret}`, allowed_updates: ['message', 'callback_query'],
+    max_connections: 1, drop_pending_updates: false,
+  });
+  for (const trigger of ScriptApp.getProjectTriggers()) {
+    if (['pollHostedTest', 'pollHostedReview'].includes(trigger.getHandlerFunction())) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  }
+  console.log('Telegram webhook registered. Tap Skip on a card to verify delivery.');
+}
+
+function restoreHostedReviewPolling() {
+  const config = settings();
+  telegram(config, 'deleteWebhook', {drop_pending_updates: false});
+  installHostedReviewTrigger();
+}
+
+function checkHostedReviewWebhook() {
+  const info = telegram(settings(), 'getWebhookInfo', {});
+  console.log(`Webhook active: ${Boolean(info.url)}. Pending Telegram updates: ${info.pending_update_count}.`);
+  if (info.last_error_message) console.log(info.last_error_message.replace(/https?:\/\/\S+/g, '[URL]'));
+}
+
+function receiveTelegramWebhook(event) {
+  const config = settings();
+  const secret = config.properties.getProperty(WEBHOOK_KEY);
+  const response = () => HtmlService.createHtmlOutput('OK');
+  const raw = event.postData?.contents || '';
+  if (!secret || event.parameter?.telegram_hook !== secret || raw.length > 100000) return response();
+  const update = JSON.parse(raw);
+  if (!Number.isSafeInteger(update?.update_id)) return response();
+  const callback = update.callback_query;
+  let acknowledged = false;
+  if (callback?.message?.chat?.type === 'private' && String(callback.message.chat.id) === config.chatId &&
+      String(callback.from?.id) === config.chatId) {
+    try {
+      telegram(config, 'answerCallbackQuery', {callback_query_id: callback.id, text: 'Received. Saving your action…'});
+      acknowledged = true;
+    } catch (_) {
+      // Continue if Telegram has already expired the acknowledgement.
+    }
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(60000);
+  try {
+    const last = JSON.parse(config.properties.getProperty(WEBHOOK_UPDATE_KEY) || 'null');
+    const now = Date.now();
+    if (last && now - last.at < 6 * 86400000 && update.update_id <= last.id) return response();
+    handleTelegramUpdate(config, update, true, acknowledged);
+    config.properties.setProperty(WEBHOOK_UPDATE_KEY, JSON.stringify({id: update.update_id, at: now}));
+  } finally {
+    lock.releaseLock();
+  }
+  return response();
 }
 
 function installHostedTestTrigger() {
@@ -418,6 +496,8 @@ function publishHostedCards(batch) {
 }
 
 function doPost(event) {
+  if (event?.parameter?.telegram_probe === '1') return HtmlService.createHtmlOutput('outreach-webhook-ready');
+  if (event?.parameter?.telegram_hook) return receiveTelegramWebhook(event);
   let result = {ok: false};
   try {
     const batch = verifiedShortlist(event);

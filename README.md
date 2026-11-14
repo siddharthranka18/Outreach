@@ -44,6 +44,15 @@ On a live review card, **Edit** opens a reply prompt. Put the subject on the fir
 
 The hosted workflow checks reviewed companies, existing discovery results, and a sample of the Startups Gallery India directory for hiring contacts and public ATS openings. Matching roles get application cards. Enquiry cards require a published hiring email and an email draft.
 
+### Receive Telegram taps by webhook
+
+1. Update `Code.gs` in the existing Apps Script project. In **Deploy → Manage deployments**, edit the active web app and deploy a **New version**.
+2. In **Project Settings → Script properties**, set `OUTREACH_WEB_APP_URL` to the existing web app URL ending in `/exec`.
+3. Run `installHostedReviewWebhook` once from the editor. It registers the same bot, preserves queued updates, and removes the polling triggers after registration succeeds.
+4. Tap **Skip** on a card you intend to skip. Telegram should acknowledge the tap promptly, followed by a message when the action is saved. Reply-based draft edits also use the webhook.
+
+Run `checkHostedReviewWebhook` to see pending updates and Telegram's last delivery error. Run `restoreHostedReviewPolling` to switch back to the five-minute trigger if webhook delivery fails.
+
 To enable the hosted enquiry flow, update `Code.gs` in the existing Apps Script project and deploy a new version of the existing web app. Add `GEMINI_API_KEY` under **Settings → Secrets and variables → Actions → Secrets** in GitHub, then run **Outreach daily discovery** from the Actions tab. The workflow generates up to five new drafts per run and reuses saved drafts and Telegram edits from the private sheet. Gmail sends only after **Approve & Send**.
 
 Run the tests from `startup-outreach-agent/` with `python -m pytest -q`.
