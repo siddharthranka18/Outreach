@@ -7,6 +7,10 @@ on:
         description: Send only email enquiry cards
         type: boolean
         default: false
+      validate_only:
+        description: Check runner setup without sending a Telegram digest
+        type: boolean
+        default: false
   schedule:
     - cron: '45 3 * * *' # 09:15 IST
     - cron: '5 4 * * *' # 09:35 IST backup
@@ -35,9 +39,10 @@ jobs:
     steps:
       - name: Check digest delivery window
         id: slot
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || inputs.validate_only
+        working-directory: ${{ github.workspace }}
         env:
-          DIGEST_SCHEDULE: ${{ github.event.schedule }}
+          DIGEST_SCHEDULE: ${{ github.event.schedule || '45 3 * * *' }}
         run: |
           case "$DIGEST_SCHEDULE" in
             '45 3 * * *'|'5 4 * * *'|'27 4 * * *'|'11 5 * * *') first=0915; last=1115 ;;
@@ -61,7 +66,7 @@ jobs:
       - run: python -m alembic upgrade head
         if: github.event_name != 'schedule' || steps.slot.outputs.id != ''
       - name: Refresh funding and portfolio leads
-        if: github.event_name != 'schedule' || steps.slot.outputs.id != ''
+        if: "!inputs.validate_only && (github.event_name != 'schedule' || steps.slot.outputs.id != '')"
         continue-on-error: true
         run: |
           python run.py --funding-leads > "$RUNNER_TEMP/outreach-leads.txt"
@@ -70,7 +75,7 @@ jobs:
           cat "$RUNNER_TEMP/outreach-leads.txt" >> "$GITHUB_STEP_SUMMARY"
           printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
       - name: Discover and post Telegram digest
-        if: github.event_name != 'schedule' || steps.slot.outputs.id != ''
+        if: "!inputs.validate_only && (github.event_name != 'schedule' || steps.slot.outputs.id != '')"
         run: |
           if [[ "$ENQUIRIES_ONLY" == true ]]; then
             python run.py --hosted-daily --hosted-enquiries-only
