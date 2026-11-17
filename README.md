@@ -42,6 +42,10 @@ On a live review card, **Edit** opens a reply prompt. Put the subject on the fir
 
 ## Hosted Telegram digest
 
+GitHub's scheduled runs can arrive hours late. A scheduled run serves the current IST delivery window (09:15–11:15 or 18:15–20:15), regardless of which cron entry triggered it. Runs in the same window share a delivery ID.
+
+For a second scheduler, create a fine-grained GitHub token scoped to the Outreach repository with **Actions: Read and write**. Add it as `OUTREACH_GITHUB_TOKEN` in the existing Apps Script project's **Script properties**. Copy [DigestScheduler.gs](startup-outreach-agent/hosting/apps-script/DigestScheduler.gs) into a separate script file in that project, save, and run `installDigestScheduler` once. The time trigger checks every five minutes, dispatches the workflow once per window after GitHub accepts the request, and retries failed dispatch requests on later ticks. The trigger runs from the saved script and needs no web app redeployment. Renew the token before it expires.
+
 The hosted workflow checks reviewed companies, existing discovery results, and a sample of the Startups Gallery India directory for hiring contacts and public ATS openings. Matching roles get application cards. Enquiry cards require a published hiring email and an email draft.
 
 ### Receive Telegram taps by webhook
