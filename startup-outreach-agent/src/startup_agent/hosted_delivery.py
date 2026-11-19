@@ -285,7 +285,9 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
     # Leave room in the 30-card Telegram delivery limit for enquiries.
     cards = (enquiries if enquiries_only else [*cards[:20], *enquiries, *cards[20:]])[:100]
     logger.info("Prepared %d email enquiry card(s) for hosted review.", len(enquiries))
+    logger.info("Prepared %d ranked application routes and %d total hosted cards.", len(routes), len(cards))
     result = hosted_request(endpoint, secret, run_id, cards)
     if type(result.get("sent")) is not int:
         raise RuntimeError("Apps Script did not confirm the Telegram delivery count.")
+    logger.info("Hosted review accepted %d cards and delivered %d after saved-action checks.", len(cards), result["sent"])
     return result["sent"]

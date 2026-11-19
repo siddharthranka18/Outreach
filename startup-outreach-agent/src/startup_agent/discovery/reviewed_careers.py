@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import logging
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 import httpx
@@ -30,6 +31,15 @@ class ReviewedInternship:
 LIVINGAI = "https://livingai.in/careers/"
 CURVVTECH = "https://www.curvvtech.com/careers"
 INTERNSHIPS = (
+    ReviewedInternship(
+        "MAGDOX", "https://magdox.io", "https://magdox.io/careers/",
+        "Software Engineer Intern (Full Stack)", "Remote / India",
+        'a[href="/careers/software-engineer-intern/"]',
+        "Build features, fix bugs and write tests across a Go backend, React web app and Python "
+        "firmware analysis engines. Six-month full-time internship. Freshers welcome. "
+        "Use Git, APIs, databases and automated tests while building a firmware security product.",
+        hiring_email="careers@magdox.io",
+    ),
     ReviewedInternship(
         "LivingAI", "https://livingai.in", LIVINGAI, "Applied AI Engineer Intern",
         "Bengaluru, India (onsite)", "article#applied-ai-intern",
@@ -79,7 +89,7 @@ class ReviewedCareersDiscoverySource(BaseDiscoverySource):
                 continue
             job_url = (
                 f"{role.careers}#{role.fragment}" if role.fragment
-                else f"{role.careers.rsplit('/careers', 1)[0]}{card['href']}"
+                else urljoin(role.careers, card["href"])
             )
             description = role.summary
             if role.hiring_email and card.select_one(f'a[href^="mailto:{role.hiring_email}"]'):

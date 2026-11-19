@@ -1,4 +1,28 @@
 # Publicly reported employee bands, keyed by the employer's official domain.
+truefoundry.com:
+  company_name: TrueFoundry
+  employee_count: "51-200"
+  source_url: https://www.linkedin.com/company/truefoundry
+  checked_on: 2026-11-19
+  careers_url: https://www.truefoundry.com/careers
+magdox.io:
+  company_name: MAGDOX
+  employee_count: "2-10"
+  source_url: https://www.linkedin.com/company/fdie
+  checked_on: 2026-11-19
+  careers_url: https://magdox.io/careers/
+altimate.ai:
+  company_name: Altimate AI
+  employee_count: "11-50"
+  source_url: https://in.linkedin.com/company/altimate-ai
+  checked_on: 2026-11-19
+  ats_url: https://jobs.ashbyhq.com/altimate
+composio.dev:
+  company_name: Composio
+  employee_count: "11-50"
+  source_url: https://www.linkedin.com/company/composiohq
+  checked_on: 2026-11-19
+  ats_url: https://jobs.ashbyhq.com/composio
 airbound.com:
   company_name: Airbound
   employee_count: "51-200"
