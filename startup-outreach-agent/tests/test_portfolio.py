@@ -1,0 +1,33 @@
+import json
+from pathlib import Path
+from unittest.mock import Mock
+import pytest
+from startup_agent.discovery.portfolio import PortfolioDiscoverySource, parse_consider, size_band, export_suggestions
+from startup_agent.matching.startup_filter import StartupEligibilityFilter, StartupEligibilityStatus
+
+FIXTURE = Path(__file__).parent / "fixtures/consider.json"
+
+def test_consider_retains_evidence_and_rejects_restricted_and_senior():
+    result = parse_consider(json.loads(FIXTURE.read_text()), "vc_test", "https://board.example")
+    assert len(result.jobs) == 1
+    assert result.companies[0].employee_count == "11-50"
+    assert result.companies[0].funding_stage == "Seed"
+    assert result.jobs[0].job_url == "https://studio.example/careers/intern"
+    assert size_band("201-500 employees") == "201-500"
+    assert StartupEligibilityFilter(200, False).evaluate(size_band("51-250 employees")).status != StartupEligibilityStatus.ELIGIBLE
+
+def test_consider_bounded_and_no_token_in_persisted_data(tmp_path):
+    client = Mock()
+    client.get.return_value.text = 'window.serverInitialData = {"board":{"id":"test"},"csrfToken":"temporary"};'
+    client.post.return_value.json.return_value = json.loads(FIXTURE.read_text())
+    result = PortfolioDiscoverySource("vc_test", "https://board.example", {"provider":"consider"}, http_client=client).discover()
+    assert client.post.call_count == 1
+    path = tmp_path / "suggested.yaml"
+    export_suggestions(result.companies, path)
+    assert "review_required: true" in path.read_text()
+    assert "temporary" not in path.read_text()
+    with pytest.raises(ValueError): export_suggestions(result.companies, tmp_path / "company_sizes.yaml")
+
+def test_getro_unverified_cannot_silently_return_success():
+    with pytest.raises(ValueError):
+        PortfolioDiscoverySource("vc_blocked", "https://board.example", {"provider":"getro"}).discover()

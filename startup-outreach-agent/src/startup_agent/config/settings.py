@@ -18,6 +18,7 @@ class SourceConfig:
     enabled: bool
     description: str
     url: Optional[str] = None
+    options: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,7 @@ class Settings:
                             enabled=bool(item.get("enabled", False)),
                             description=item.get("description", ""),
                             url=item.get("url"),
+                            options=item.get("options") or {},
                         )
                     )
 

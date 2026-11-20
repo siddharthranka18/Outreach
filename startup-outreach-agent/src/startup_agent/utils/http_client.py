@@ -35,6 +35,7 @@ class HttpClient:
         self.max_retries = max_retries
         self.rate_limit_delay = rate_limit_delay
         self._last_request_time = 0.0
+        self._cookies = httpx.Cookies()
 
     def _apply_rate_limit(self) -> None:
         """Enforce delay between consecutive outgoing requests."""
@@ -78,6 +79,7 @@ class HttpClient:
                     timeout=self.timeout,
                     follow_redirects=True,
                     headers=req_headers,
+                    cookies=self._cookies,
                 ) as client:
                     current = str(httpx.URL(url, params=params)) if params else url
                     for redirect in range(5):
@@ -103,6 +105,7 @@ class HttpClient:
                         time.sleep(sleep_time)
                         continue
 
+                    self._cookies.update(client.cookies)
                     resp.raise_for_status()
                     return resp
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
@@ -145,12 +148,18 @@ class HttpClient:
         for attempt in range(self.max_retries + 1):
             self._apply_rate_limit()
             try:
+                if self.public_only:
+                    validate_public_url(url)
                 with httpx.Client(
                     timeout=self.timeout,
-                    follow_redirects=True,
+                    follow_redirects=not self.public_only,
                     headers=req_headers,
+                    cookies=self._cookies,
                 ) as client:
                     resp = client.post(url, json=json_data)
+                    self._cookies.update(client.cookies)
+                    if self.public_only and resp.is_redirect:
+                        raise httpx.RequestError("Public POST redirect refused.")
                     if resp.status_code in (429, 500, 502, 503, 504) and attempt < self.max_retries:
                         sleep_time = DEFAULT_BACKOFF_FACTOR * (2**attempt)
                         logger.warning(

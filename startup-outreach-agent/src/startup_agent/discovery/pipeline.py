@@ -14,6 +14,7 @@ from startup_agent.database.engine import create_db_engine
 from startup_agent.database.repositories import CompanyRepository, JobRepository
 from startup_agent.database.session import create_session_factory, session_scope
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
+from startup_agent.discovery.portfolio import PortfolioDiscoverySource
 from startup_agent.discovery.andhra_startup_map import AndhraStartupMapDiscoverySource
 from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
 from startup_agent.discovery.hasjob import HasjobDiscoverySource
@@ -123,7 +124,9 @@ class DiscoveryPipeline:
             if not src.enabled:
                 continue
             adapter_cls = SOURCE_ADAPTER_REGISTRY.get(src.name)
-            if adapter_cls in (HimalayasDiscoverySource, RemotiveDiscoverySource):
+            if src.type == "vc_portfolio":
+                adapters.append(PortfolioDiscoverySource(src.name, src.url, src.options))
+            elif adapter_cls in (HimalayasDiscoverySource, RemotiveDiscoverySource):
                 reviewed = [
                     (domain, evidence) for domain, evidence in self.size_evidence.items()
                     if self.startup_filter.evaluate(evidence.get("employee_count")).status

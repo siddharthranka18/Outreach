@@ -1,5 +1,54 @@
 version: "1.0"
 sources:
+  - name: vc_peakxv
+    display_name: Peak XV portfolio
+    type: vc_portfolio
+    enabled: true
+    url: https://careers.peakxv.com
+    options: {provider: consider, max_pages: 3}
+    description: Public Consider search, India technical early-career roles.
+  - name: vc_lightspeed
+    display_name: Lightspeed portfolio
+    type: vc_portfolio
+    enabled: true
+    url: https://jobs.lsvp.com
+    options: {provider: consider, max_pages: 3}
+    description: Public Consider search; full published size bands retained.
+  - name: vc_bessemer
+    display_name: Bessemer portfolio
+    type: vc_portfolio
+    enabled: true
+    url: https://jobs.bvp.com
+    options: {provider: consider, max_pages: 3}
+    description: Public Consider search; full published size bands retained.
+  - name: vc_nexus
+    display_name: Nexus portfolio
+    type: vc_portfolio
+    enabled: false
+    url: https://jobs.nexusvp.com
+    options: {provider: consider, max_pages: 3}
+    description: Disabled until public page connects and protocol is verified.
+  - name: vc_accel
+    display_name: Accel portfolio
+    type: vc_portfolio
+    enabled: false
+    url: https://jobs.accel.com
+    options: {provider: getro}
+    description: Public page blocked (403); no verified keyless search. Do not enable yet.
+  - name: vc_gc
+    display_name: General Catalyst portfolio
+    type: vc_portfolio
+    enabled: false
+    url: https://jobs.generalcatalyst.com
+    options: {provider: getro}
+    description: Public page blocked (403); no verified keyless search. Do not enable yet.
+  - name: vc_blume
+    display_name: Blume portfolio
+    type: vc_portfolio
+    enabled: false
+    url: https://jobs.blume.vc
+    options: {provider: getro}
+    description: Public page blocked (403); no verified keyless search. Do not enable yet.
   - name: "reviewed_careers"
     display_name: "Reviewed Startup Careers"
     type: "employer_careers"
