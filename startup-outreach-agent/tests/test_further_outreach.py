@@ -126,3 +126,39 @@ def test_sqlite_evidence_feeds_himalayas_and_remotive_without_yaml(db_session,tm
     adapters=DiscoveryPipeline(settings=Settings(base_dir=tmp_path,sources=sources),session=db_session)._resolve_adapters()
     assert adapters[0].employers_by_name['studio'][0]=='studio.example'
     assert adapters[1].employers['studio'][1]['employee_count']=='11-50'
+
+def test_reviewed_evidence_backfills_old_jobs_not_fetched_again(db_session,tmp_path):
+    from startup_agent.config.settings import Settings
+    from startup_agent.discovery.pipeline import DiscoveryPipeline
+    (tmp_path/'config').mkdir()
+    (tmp_path/'config/company_sizes.yaml').write_text('studio.example:\n  employee_count: "11-50"\n  source_url: https://studio.example/about\n')
+    company=CompanyRepository(db_session).upsert_company(Company(company_name='Studio',website='https://studio.example',
+        source_name='old_feed',source_url='https://board.example/studio'))
+    DiscoveryPipeline(settings=Settings(base_dir=tmp_path),session=db_session)._backfill_reviewed_sizes()
+    assert company.employee_count=='11-50'
+
+def test_employer_domain_lookup_handles_name_variants_without_size_borrowing():
+    from startup_agent.discovery.employer_lookup import known_employer
+    assert known_employer('Studio Incorporated',EMPLOYERS,'https://www.studio.example/about')[0]=='studio.example'
+    assert known_employer('Studio',EMPLOYERS,'https://different.example') is None
+    assert known_employer('Studio',EMPLOYERS)==EMPLOYERS['studio']
+
+def test_handled_companies_do_not_consume_employer_page_budget(db_session,tmp_path,monkeypatch):
+    from startup_agent.hosted_delivery import enquiry_candidates
+    from startup_agent.config.settings import Settings
+    CompanyRepository(db_session).upsert_company(Company(company_name='Studio',website='https://studio.example',
+        source_name='vc',source_url='https://board.example',employee_count='11-50',careers_url='https://studio.example/careers'))
+    monkeypatch.setattr('startup_agent.hosted_delivery.gallery_leads',lambda *args,**kwargs:[])
+    monkeypatch.setattr('startup_agent.hosted_delivery.funded_employers',lambda *args,**kwargs:[])
+    fetch=Mock();monkeypatch.setattr('startup_agent.hosted_delivery.employer_page',fetch)
+    assert enquiry_candidates(db_session,Settings(base_dir=tmp_path),CandidateProfile.load(),history=[{
+        'url':'https://studio.example/#outreach-enquiry','status':'skipped'}])==[]
+    fetch.assert_not_called()
+
+def test_cheap_feeds_run_before_per_company_yc_job_fetches(db_session,tmp_path):
+    from startup_agent.config.settings import Settings,SourceConfig
+    from startup_agent.discovery.pipeline import DiscoveryPipeline
+    sources=[SourceConfig('y_combinator','YC','directory',True,'fixture'),
+             SourceConfig('we_work_remotely','WWR','community_feed',True,'fixture',url='https://weworkremotely.com/rss')]
+    adapters=DiscoveryPipeline(settings=Settings(base_dir=tmp_path,sources=sources),session=db_session)._resolve_adapters()
+    assert [adapter.name for adapter in adapters]==['we_work_remotely','y_combinator']

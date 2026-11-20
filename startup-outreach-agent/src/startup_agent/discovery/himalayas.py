@@ -14,6 +14,7 @@ from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 from startup_agent.utils.http_client import HttpClient
 from startup_agent.utils.normalizers import normalize_job_url, normalize_name
+from startup_agent.discovery.employer_lookup import known_employer
 
 
 SEARCH_URL = "https://himalayas.app/jobs/api/search"
@@ -56,7 +57,9 @@ class HimalayasDiscoverySource(BaseDiscoverySource):
             slug = listing.get("companySlug")
             url = listing.get("applicationLink")
             name = listing.get("companyName") or ""
-            employer = self.employers.get(slug) or self.employers_by_name.get(normalize_name(name))
+            website_hint=listing.get('companyWebsite')
+            employer = (known_employer(name,{**self.employers,**self.employers_by_name},website_hint)
+                        if website_hint else self.employers.get(slug) or known_employer(name,self.employers_by_name))
             internship = listing.get("employmentType") == "Intern"
             seniority = listing.get("seniority") or []
             entry_level = seniority == ["Entry-level"]

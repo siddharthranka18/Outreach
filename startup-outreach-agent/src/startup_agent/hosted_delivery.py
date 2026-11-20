@@ -151,7 +151,7 @@ def board_jobs(urls: list[str], name: str, website: str, size: str, client: Http
     return jobs
 
 
-def enquiry_candidates(session: Session, settings: Settings, profile: CandidateProfile) -> list[dict]:
+def enquiry_candidates(session: Session, settings: Settings, profile: CandidateProfile, history=None) -> list[dict]:
     if any(s.name == "enquiry_research" and not s.enabled for s in settings.sources):
         return []
     size_filter = StartupEligibilityFilter(max_employees=profile.preferences.small_startup_max_employees)
@@ -234,6 +234,10 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
         if lead.get("company_name") and lead.get("careers_url")
         and size_filter.evaluate(lead.get("employee_count")).status == StartupEligibilityStatus.ELIGIBLE
     ]
+    handled={entry.get('url') for entry in history or [] if entry.get('status') in {'skipped','applied'}
+             or entry.get('delivery') in {'sent','sending','uncertain'}}
+    eligible=[(domain,lead) for domain,lead in eligible if not any(
+        f'https://{domain}/#outreach-enquiry'+suffix in handled for suffix in ('','-form'))]
     pitch_contexts = {}
     for job in session.scalars(select(JobModel).where(JobModel.status == "open")):
         context = junior_pitch_context(job, job.company, profile)
@@ -393,7 +397,7 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
 
     profile = CandidateProfile.load(settings.config_dir / "candidate_profile.yaml")
     history = hosted_request(endpoint, secret, "enquiry-history", [])["entries"]
-    candidates = enquiry_candidates(session, settings, profile)
+    candidates = enquiry_candidates(session, settings, profile, history=history)
     routes = [route for route in build_outreach_routes(session, settings) if route.job_id is not None and route.url]
     job_urls = dict(session.execute(select(JobModel.id, JobModel.normalized_job_url)).all())
     cards = [

@@ -11,6 +11,7 @@ from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 from startup_agent.utils.http_client import HttpClient
 from startup_agent.utils.normalizers import normalize_name, normalize_job_url
+from startup_agent.discovery.employer_lookup import known_employer
 
 FEEDS = {
     "remoteok": ("https://remoteok.com/api", "remoteok.com", "Remote OK"),
@@ -49,7 +50,7 @@ class RemoteFeedDiscoverySource(BaseDiscoverySource):
                 self.rejections["No explicit India/worldwide permission"] += 1
                 continue
             name = row.get("companyName") if self.name == "jobicy" else row.get("company_name") if self.name == "working_nomads" else row.get("company")
-            employer = self.employers.get(normalize_name(name or ""))
+            employer = known_employer(name,self.employers,row.get('company_website') or row.get('companyWebsite'))
             if not employer:
                 self.rejections["Employer domain/size not reviewed"] += 1
                 continue

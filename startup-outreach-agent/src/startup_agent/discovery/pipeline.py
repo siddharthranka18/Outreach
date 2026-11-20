@@ -212,9 +212,14 @@ class DiscoveryPipeline:
                 adapters.append(adapter_cls(name=src.name, enabled=True))
             else:
                 logger.warning("No registered discovery adapter for source: '%s'", src.name)
-        # Enrich identities before feeds that otherwise cannot resolve a new employer.
-        return sorted(adapters,key=lambda a:0 if isinstance(a,(PortfolioDiscoverySource,YCombinatorDiscoverySource))
-                      else 2 if isinstance(a,DirectAtsDiscoverySource) else 1)
+        # Seed identities first, then cheap feeds. Per-company YC job pages must
+        # not consume the whole run before the newer feeds get a turn.
+        def priority(adapter):
+            if isinstance(adapter,PortfolioDiscoverySource):return 0
+            if isinstance(adapter,YCombinatorDiscoverySource):
+                return 2 if adapter.include_jobs else 0
+            return 3 if isinstance(adapter,DirectAtsDiscoverySource) else 1
+        return sorted(adapters,key=priority)
 
     def _stored_ats_targets(self):
         if self.session is not None:
@@ -252,6 +257,7 @@ class DiscoveryPipeline:
         """Execute the discovery pipeline across all resolved sources."""
         start_time = time.time()
         summary = DiscoverySummary()
+        self._backfill_reviewed_sizes()
         adapters = self._resolve_adapters()
 
         if not adapters:
@@ -273,7 +279,8 @@ class DiscoveryPipeline:
                 summary.sources_failed.append((adapter.name,'Discovery time budget reached'))
                 continue
             if isinstance(getattr(adapter,'http_client',None),HttpClient):
-                adapter.http_client.deadline=min(discovery_deadline,time.monotonic()+(120 if isinstance(adapter,PortfolioDiscoverySource) else 600))
+                source_seconds=120 if isinstance(adapter,PortfolioDiscoverySource) else 240 if isinstance(adapter,YCombinatorDiscoverySource) else 600
+                adapter.http_client.deadline=min(discovery_deadline,time.monotonic()+source_seconds)
             try:
                 raw_result = adapter.discover()
                 self.successful_polls.extend(getattr(adapter, "successful_polls", []))
@@ -375,6 +382,25 @@ class DiscoveryPipeline:
             summary.jobs_updated,
         )
         return summary
+
+    def _backfill_reviewed_sizes(self):
+        """Reviewed domain evidence also applies to old records not rediscovered today."""
+        def apply(session):
+            updated=0
+            for company in session.scalars(select(CompanyModel)):
+                if _is_indirect_company_url(company.website):continue
+                domain=company.normalized_website.split('/',1)[0]
+                evidence=self.size_evidence.get(domain,{})
+                if evidence.get('employee_count') and company.employee_count!=evidence['employee_count']:
+                    company.employee_count=evidence['employee_count']
+                    updated+=1
+            session.flush()
+            logger.info('Applied reviewed size evidence to %d stored companies.',updated)
+        if self.session is not None:
+            apply(self.session)
+        else:
+            factory=create_session_factory(create_db_engine(self.settings.database_url))
+            with session_scope(factory) as session:apply(session)
 
     def _hydrate_known_company_sizes(self, companies: List[Company]) -> None:
         """Reuse a size verified by an earlier source before ATS expansion."""

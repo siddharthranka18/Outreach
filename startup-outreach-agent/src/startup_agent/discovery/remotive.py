@@ -13,6 +13,7 @@ from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 from startup_agent.utils.http_client import HttpClient
 from startup_agent.utils.normalizers import normalize_job_url, normalize_name
+from startup_agent.discovery.employer_lookup import known_employer
 
 FEED_URL = "https://remotive.com/api/remote-jobs"
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ class RemotiveDiscoverySource(BaseDiscoverySource):
                 continue
             location_matches += 1
             name = listing.get("company_name") or ""
-            employer = self.employers.get(normalize_name(name))
+            employer = known_employer(name,self.employers,listing.get('company_website'))
             url = listing.get("url") or ""
             if not employer or urlsplit(url).scheme != "https" or urlsplit(url).netloc != "remotive.com":
                 continue

@@ -1,6 +1,6 @@
 # Outreach platform architecture and workflow
 
-Code snapshot updated 20 November 2026. The Oracle VM units were inspected on 19 November; the additions described here require VM synchronization and a new Apps Script deployment. Runtime secrets are omitted.
+Code snapshot updated 20 November 2026. The base update was deployed to the Oracle VM with migration 61d8c09ea421; the live validation result and any final follow-up are recorded in docs/DAILY_DIGEST_IMPROVEMENTS.md. This update does not change Code.gs. Runtime secrets are omitted.
 
 ## 1. Purpose and current deployment
 
@@ -53,7 +53,7 @@ The Python discovery process runs on the VM. Telegram interaction handling runs 
 
 ### 3.1 Sources enabled in sources.yaml
 
-The original discovery sources remain, with Remotive re-enabled, seven enabled Consider portfolios, HN, public remote/community feeds, two Indian boards, two funding RSS sources and a weekly YC company seed. Additional ATS platforms are controlled within the existing ATS path. Source-level success means the adapter completed; it can return zero eligible records. Platform and enquiry-option entries control existing paths rather than starting parallel discovery runs.
+The original discovery sources remain, with Remotive re-enabled, seven enabled Consider portfolios, HN, public remote/community feeds, two Indian boards, two funding RSS sources and a weekly YC company seed. Additional ATS platforms are controlled within the existing ATS path. Quick feeds run before the slower per-company YC job fetches, whose request budget is four minutes. Source-level success means the adapter completed; it can return zero eligible records. Platform and enquiry-option entries control existing paths rather than starting parallel discovery runs.
 
 | Source | Fetching method | Scope and important limits |
 | --- | --- | --- |
@@ -161,6 +161,8 @@ Company identity uses normalized websites and names. Job upserts attempt source-
 URL normalization removes common tracking parameters and trailing slashes. LivingAI's role anchors are preserved because multiple roles share one careers-page URL.
 
 The database retains historical records. General discovery does not uniformly mark every missing posting closed. Freshness checks vary by source. Re-fetching a source alone is insufficient evidence that every previously stored job remains open.
+
+Reviewed size evidence is also backfilled by employer domain onto old stored company records before adapter resolution, even when no source rediscovers that employer in the current run.
 
 ATS board tokens observed in company metadata, job links and employer pages are persisted in companies.ats_boards, then reused on later runs. The tracker never inserts invented board names. A failed or partial poll never counts as evidence that a job closed. Three successful complete snapshots missing a posting close it; jobs not re-seen for thirty days also close. Skipped/applied history is preserved, and a live old advert is not closed solely because of its publication date. An Alembic migration is required before running this version.
 
@@ -347,16 +349,16 @@ Delivery is recorded as sending before the mail request, then sent or uncertain.
 
 ## 12. Oracle VM scheduler and runtime
 
-Live units inspected on 19 November 2026:
+VM units inspected and updated on 20 November 2026:
 
 - Ubuntu 24.04 on an x86_64 Oracle VM.
 - Working directory /home/ubuntu/Outreach/startup-outreach-agent.
 - Persistent SQLite storage on the VM.
 - A Python virtual environment at .venv.
-- outreach-digest.service runs as ubuntu with Type=oneshot and TimeoutStartSec=20min.
+- outreach-digest.service runs as ubuntu with Type=oneshot and TimeoutStartSec=45min (workload-budget.conf drop-in).
 - The service executes .venv/bin/python run.py --hosted-daily.
 - outreach-digest.timer has 09:15 and 18:15 Asia/Kolkata calendar entries with AccuracySec=1s.
-- These correspond to 03:45 and 12:45 UTC.
+- These correspond to 03:45 and 12:45 UTC. Persistent=true is enabled through a catch-up.conf timer drop-in.
 - The timer has no Persistent=true setting, so runs missed while the VM is off are not automatically caught up.
 - No retry policy or failure-notification unit is defined in the inspected service.
 
