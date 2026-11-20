@@ -5,6 +5,8 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote_plus, urljoin
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
 from startup_agent.models.company import Company
@@ -31,6 +33,10 @@ class YCombinatorDiscoverySource(BaseDiscoverySource):
         include_jobs: bool = True,
         target_region_groups: Optional[List[List[str]]] = None,
         http_client: Optional[HttpClient] = None,
+        batches=None,
+        max_pages=1,
+        include_non_hiring=False,
+        seed_state_path=None,
     ) -> None:
         super().__init__(name=name, enabled=enabled)
         self.max_companies = max_companies
@@ -41,6 +47,14 @@ class YCombinatorDiscoverySource(BaseDiscoverySource):
             ["Fully Remote", "Remote"],
         ]
         self.http_client = http_client or HttpClient()
+        self.batches=[]
+        for batch in batches or []:
+            match=re.fullmatch(r'([WSF])(\d{2})',batch)
+            self.batches.append(f"{ {'W':'Winter','S':'Summer','F':'Fall'}[match[1]]} 20{match[2]}" if match else batch)
+        self.max_pages=max(1,min(int(max_pages),8))
+        self.include_non_hiring=include_non_hiring
+        self.seed_state_path=Path(seed_state_path) if seed_state_path else None
+        self.seed_completed=False
 
     @staticmethod
     def _is_early_career_candidate(title: str, card_text: str) -> bool:
@@ -97,6 +111,9 @@ class YCombinatorDiscoverySource(BaseDiscoverySource):
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
+        from startup_agent.discovery.direct_ats import extract_ats_target
+        company.ats_urls.extend(urljoin(jobs_url,a['href']) for a in soup.select('a[href]')
+            if extract_ats_target(urljoin(jobs_url,a['href']),company.company_name,company.website))
         expected_prefix = f"/companies/{slug}/jobs/"
         jobs: List[Job] = []
         seen_urls = set()
@@ -171,6 +188,11 @@ class YCombinatorDiscoverySource(BaseDiscoverySource):
         """Fetch and normalize companies from Y Combinator directory."""
         if not self.is_enabled():
             return DiscoveryResult()
+        if self.seed_state_path and self.seed_state_path.exists():
+            try:
+                checked=datetime.fromisoformat(self.seed_state_path.read_text().strip())
+                if datetime.now(timezone.utc)-checked < timedelta(days=7):return DiscoveryResult()
+            except (ValueError,OSError):pass
 
         logger.info("Executing Y Combinator discovery (target limit: %d)...", self.max_companies)
         creds = self._get_algolia_credentials()
@@ -191,9 +213,10 @@ class YCombinatorDiscoverySource(BaseDiscoverySource):
         hits_by_id: Dict[str, Dict[str, Any]] = {}
         for region_group in self.target_region_groups:
             facet_filters = [
-                ["isHiring:true"],
                 [f"regions:{region}" for region in region_group],
             ]
+            if not self.include_non_hiring: facet_filters.append(["isHiring:true"])
+            if self.batches: facet_filters.append([f"batch:{batch}" for batch in self.batches])
             payload = {
                 "params": (
                     f"hitsPerPage={self.max_companies}&query="
@@ -201,13 +224,13 @@ class YCombinatorDiscoverySource(BaseDiscoverySource):
                     f"&numericFilters=team_size%3C%3D{self.max_employees}"
                 )
             }
-            response = self.http_client.post(
-                query_url, json_data=payload, headers=headers
-            )
-            for hit in response.json().get("hits", []):
-                hit_id = str(hit.get("objectID") or hit.get("id") or hit.get("slug") or "")
-                if hit_id:
-                    hits_by_id[hit_id] = hit
+            for page in range(self.max_pages):
+                response = self.http_client.post(query_url, json_data={"params":payload['params']+f"&page={page}"},headers=headers)
+                result=response.json()
+                for hit in result.get('hits',[]):
+                    hit_id=str(hit.get('objectID') or hit.get('id') or hit.get('slug') or '')
+                    if hit_id:hits_by_id[hit_id]=hit
+                if page+1>=result.get('nbPages',1):break
 
         hits = list(hits_by_id.values())
 
@@ -267,5 +290,6 @@ class YCombinatorDiscoverySource(BaseDiscoverySource):
             len(companies),
             len(jobs),
         )
+        self.seed_completed=bool(companies) and self.seed_state_path is not None
         return DiscoveryResult(companies=companies, jobs=jobs)
 

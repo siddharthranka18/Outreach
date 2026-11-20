@@ -12,7 +12,9 @@ from startup_agent.config.settings import Settings
 from startup_agent.database.models import CompanyModel, JobModel
 from startup_agent.matching.eligibility import EligibilityStatus
 from startup_agent.matching.ranker import OpportunityRanker
-from startup_agent.matching.startup_filter import StartupEligibilityStatus
+from startup_agent.matching.startup_filter import StartupEligibilityStatus, StartupEligibilityFilter
+from startup_agent.matching.scorer import OpportunityScorer
+from startup_agent.matching.classifier import OpportunityType
 from startup_agent.utils.normalizers import normalize_job_url, normalize_website
 
 
@@ -47,6 +49,30 @@ def _public_link(value: str | None) -> str | None:
         if parsed.scheme in {"https", "http"} and parsed.hostname and not parsed.username:
             return value
     return None
+
+
+def junior_pitch_context(job, company, profile):
+    """Separate internship enquiry intent; never promote a full-time role to a job card."""
+    from startup_agent.discovery.portfolio import india_location
+    if getattr(job, "status", "open") != "open": return None
+    if StartupEligibilityFilter(50,False).evaluate(company.employee_count).status != StartupEligibilityStatus.ELIGIBLE:
+        return None
+    if not re.search(r"\b(?:junior|jr\.?|entry[- ]level|fresher)\b",job.job_title,re.I): return None
+    location=job.location or ""
+    if not india_location(location) and not re.search(r"\b(?:bengaluru|bangalore|delhi|mumbai|pune|hyderabad|chennai|gurugram|noida)\b", location,re.I):
+        return None
+    full=f"{job.job_title} {job.description or ''} {job.experience_level or ''}".replace('\u2013','-')
+    # Explicit 0-1, zero experience or no experience; do not invent eligibility.
+    if not re.search(r"\b0\s*(?:-|to)\s*1\s*(?:years?|yrs?)\b|\b(?:0|zero|no)\s+(?:years?\s+of\s+)?experience\b",full,re.I): return None
+    if any(int(n)>1 for n in re.findall(r"\b(\d+)\s*\+?\s*(?:years?|yrs?)\b", full,re.I)): return None
+    match=OpportunityScorer(profile).score(job_id=getattr(job,'id',None),job_title=job.job_title,
+        company_name=company.company_name,job_url=job.job_url,description=job.description,location=job.location,
+        employment_type=job.employment_type,experience_level=job.experience_level,employee_count=company.employee_count)
+    if match.opportunity_type != OpportunityType.GRADUATE_ENTRY_LEVEL or match.eligibility_status != EligibilityStatus.POTENTIALLY_ELIGIBLE:
+        return None
+    return (f"Published junior role: {job.job_title} ({job.job_url}). This is a full-time role, not a confirmed internship. "
+            "Ask whether the team would consider a current June 2028 B.Tech student for an internship or part-time engineering contribution. "
+            "Do not claim to have graduated or to meet full-time availability.")
 
 
 def build_outreach_routes(session: Session, settings: Settings) -> list[OutreachRoute]:
@@ -112,7 +138,10 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
             source_label={"remotive": "Remotive", "himalayas": "Himalayas", "remoteok": "Remote OK",
                           "jobicy": "Jobicy", "working_nomads": "Working Nomads", "hn_hiring": "Hacker News Who is hiring",
                           "vc_peakxv": "Peak XV portfolio", "vc_lightspeed": "Lightspeed portfolio",
-                          "vc_bessemer": "Bessemer portfolio", "vc_nexus": "Nexus portfolio"}.get(job.source_name, ""),
+                          "vc_bessemer": "Bessemer portfolio", "vc_nexus": "Nexus portfolio",
+                          "vc_bain":"Bain Capital Ventures", "vc_courtside":"Courtside Ventures",
+                          "cutshort":"Cutshort", "weekday":"Weekday", "simplify_summer2027":"SimplifyJobs / Pitt CSC",
+                          "we_work_remotely":"We Work Remotely"}.get(job.source_name, ""),
             asks_for_internship=bool(re.search(
                 r"\b(?:prior|previous|completed)\b[^.!?\n]{0,50}\binternship\b"
                 r"|\binternship experience\b",

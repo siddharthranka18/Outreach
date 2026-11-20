@@ -22,7 +22,7 @@ class RemotiveDiscoverySource(BaseDiscoverySource):
     def __init__(self, employers, name="remotive", enabled=True, http_client=None):
         super().__init__(name=name, enabled=enabled)
         self.employers = employers
-        self.http_client = http_client or HttpClient()
+        self.http_client = http_client or HttpClient(public_only=True)
 
     def discover(self) -> DiscoveryResult:
         if not self.is_enabled():

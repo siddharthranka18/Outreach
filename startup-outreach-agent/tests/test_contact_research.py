@@ -17,8 +17,8 @@ def test_current_page_evidence_plain_named_and_footer():
     assert verified_contact([("https://studio.example/team",empty)], "studio.example",
         hn_leads=[{"domain":"studio.example","email":"alex@studio.example","verified":False}]) is None
 
-@pytest.mark.parametrize("size,allowed", [("2-10",True),("11-20",True),("20",True),("1-10",False),("11-50",False),("20+",False),(None,False)])
-def test_generic_inboxes_are_opt_in_and_whole_band_2_to_20(size, allowed):
+@pytest.mark.parametrize("size,allowed", [("2-10",True),("11-20",True),("20",True),("1-10",False),("11-50",True),("51-200",False),("20+",False),(None,False)])
+def test_generic_inboxes_are_opt_in_and_whole_band_2_to_50(size, allowed):
     page = BeautifulSoup('<p>Send your resume to <a href="mailto:hello@studio.example">hello@studio.example</a></p>', 'html.parser')
     assert hiring_email(page, "studio.example", employee_count=size) is None
     assert bool(hiring_email(page, "studio.example", allow_generic=True, employee_count=size)) == allowed
@@ -34,7 +34,7 @@ def test_enquiry_uses_current_contact_page_without_sending(db_session, tmp_path,
     CompanyRepository(db_session).upsert_company(Company(company_name="Studio",website="https://studio.example",
         source_name="vc_test",source_url="https://board.example/company", employee_count="11-50",
         careers_url="https://studio.example/careers"))
-    monkeypatch.setattr("startup_agent.hosted_delivery.gallery_leads", lambda client: [])
+    monkeypatch.setattr("startup_agent.hosted_delivery.gallery_leads", lambda client,**kwargs: [])
     monkeypatch.setattr("startup_agent.hosted_delivery.funded_employers", lambda reviewed: [])
     visited = []
     def fetch(url, domain, client):

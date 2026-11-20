@@ -36,9 +36,12 @@ class HttpClient:
         self.rate_limit_delay = rate_limit_delay
         self._last_request_time = 0.0
         self._cookies = httpx.Cookies()
+        self.deadline = None
 
     def _apply_rate_limit(self) -> None:
         """Enforce delay between consecutive outgoing requests."""
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise httpx.TimeoutException('Research request budget exhausted.')
         if self.rate_limit_delay <= 0:
             return
         now = time.time()

@@ -53,43 +53,43 @@ The Python discovery process runs on the VM. Telegram interaction handling runs 
 
 ### 3.1 Sources enabled in sources.yaml
 
-The original nine enabled discovery adapters remain, alongside three Consider portfolios, HN and three remote feeds. Four additional ATS platform flags are enabled within the existing ATS path. Source-level success means the adapter completed; it can return zero eligible records. Platform and enquiry-option entries control existing paths rather than starting parallel discovery runs.
+The original discovery sources remain, with Remotive re-enabled, seven enabled Consider portfolios, HN, public remote/community feeds, two Indian boards, two funding RSS sources and a weekly YC company seed. Additional ATS platforms are controlled within the existing ATS path. Source-level success means the adapter completed; it can return zero eligible records. Platform and enquiry-option entries control existing paths rather than starting parallel discovery runs.
 
 | Source | Fetching method | Scope and important limits |
 | --- | --- | --- |
 | Reviewed Startup Careers | HTML selectors on official employer pages | LivingAI, Curvvtech and MAGDOX. MAGDOX was added on 19 November. Titles, locations and descriptions are reviewed adapter records, and live selectors verify that a listing is still present. |
 | Venomics AI Careers | Official careers HTML | Checks for the machine-learning internship programme. Location is unlisted and the route explicitly asks for location confirmation. |
-| Himalayas | Free public JSON search API | Searches country IN for Intern employment and Entry-level seniority, up to three pages per query. Requires a reviewed employer slug or matching reviewed company name. Checks expiry, country and timezone metadata. |
+| Himalayas | Free public JSON search API | Searches country IN for Intern employment and Entry-level seniority, up to three pages per query. Uses employer identity/size evidence from all eligible SQLite companies plus reviewed YAML; a manually entered slug is optional. Checks expiry, country and timezone metadata. |
 | Hasjob | Public Atom feed at https://hasjob.co/feed | Technical early-career titles published in the last 30 days. Extracts employer website and listing text. Missing employee counts can prevent these jobs from passing matching. |
 | Andhra Startup Map Fresher Jobs | Public HTML at https://www.andhrastartupmap.in/jobs | Parses fresher technical listings and employer/application links. Imported listings still pass the platform's own gates. |
 | Y Combinator | Public directory search data and employer hiring pages | Discovers hiring companies through the site's search integration, with company-size filtering and region cohorts. Fetches company job pages. Public-page rate limits can cause retries or partial results. Default query limit is 75 companies per region query before deduplication. |
 | TopStartups.io | Public jobs-page HTML at https://topstartups.io/jobs/ | Extracts companies and jobs. Coverage depends on the page content the adapter receives. |
 | Wellfound India | Public HTML, beginning at https://wellfound.com/location/india | Up to five pages per run. Source adapter filters published employee bands and early-career metadata. Access failures and page changes can reduce coverage. |
 | Direct Career Pages & ATS | Public per-employer JSON APIs and RSS | Boards in company_sizes.yaml plus boards derived from discovered job links. Greenhouse, Lever, Ashby, Recruitee, Workable, Breezy, Teamtailor and BambooHR. Each new platform has its own flag. Company size must already pass before expansion. |
-| Peak XV / Lightspeed / Bessemer | Consider public board HTML plus CSRF/session-protected public search | Enabled. Reads board identity and temporary token from the page; posts the actual UI search to /api-boards/search-jobs. India query, at most three pages of 25 company groups per board. Locally requires explicit India/worldwide location and technical early-career titles. Keeps full published size bands, employer domain and stage where provided. Missing job descriptions can still block routing unless ATS enrichment supplies them. |
-| HN Who is hiring | Keyless Algolia search_by_date and items API | Enabled. Latest monthly thread by whoishiring, up to 500 top-level comments. Technical early-career text plus explicit India/worldwide permission. Unknown sizes remain excluded. Emails are saved as unverified research leads and redacted from job text so existing routing cannot treat them as approved contacts. |
+| Peak XV / Lightspeed / Bessemer / Bain / Courtside / Sequoia US / First Round | Consider public board HTML plus CSRF/session-protected public search | Enabled. Reads board identity and temporary token from the page; posts the actual UI search to /api-boards/search-jobs. India and Worldwide queries, five pages of ten company groups per query by default (maximum eight pages). Each board has a two-minute budget; successfully fetched groups survive a later-page failure. Locally requires explicit India/worldwide location and technical early-career titles. Keeps full published size bands, employer domain and stage where provided. Missing job descriptions can still block routing unless ATS enrichment supplies them. |
+| HN Who is hiring | Keyless Algolia search_by_date and items API | Enabled. Latest monthly thread by whoishiring, up to 500 top-level comments. Technical early-career text plus explicit India/worldwide permission. Unknown sizes remain excluded. Email evidence is stored separately and redacted from job text. The explicitly approved HN contact policy accepts current top-level monthly hiring posts with a matching employer domain and verified size. Checks must be no older than two days and posts no older than 45 days. Every email still requires individual approval. |
 | Remote OK | https://remoteok.com/api | Enabled. One feed request. Technical intern/junior/entry-level/new-grad title and explicit India/Worldwide/Anywhere required. Known employer domain/size evidence is required; original source posting and credit retained. |
 | Jobicy | https://jobicy.com/api/v2/remote-jobs | Enabled. One bounded feed response with the same strict title/geography/evidence requirements. Original Jobicy URL retained for application and attribution. |
 | Working Nomads | https://www.workingnomads.com/api/exposed_jobs/ | Enabled. Same strict feed filters and source link retention. Remote without explicit country permission is insufficient. |
 
 The Reviewed Startup Careers description in sources.yaml still mentions LivingAI and Curvvtech. Its implementation also includes MAGDOX.
 
-### 3.2 Implemented source currently disabled
+### 3.2 Disabled and optional sources
 
-Remotive has an adapter and configuration entry, with enabled set to false. It was trialled and returned zero qualifying listings among reviewed employers.
+Remotive is now enabled by the November 20 improvement instructions. It uses all eligible stored employer evidence rather than only the original YAML company list.
 
-Accel, General Catalyst and Blume Getro boards are configured but disabled: their public pages returned HTTP 403 and no keyless search protocol was verified. The adapter explicitly refuses unverified Getro access; it does not guess endpoints or use the network-owner bearer API. Nexus is configured as Consider but disabled following a connection failure; its public search must be verified before enabling. Personio XML support is implemented and tested, but its platform flag remains off until each intended employer's feed is verified. No separate HN-only contact evidence exception is enabled.
+Accel, General Catalyst and Blume Getro boards are configured but disabled: their public pages returned HTTP 403 and no keyless search protocol was verified. The adapter explicitly refuses unverified Getro access; it does not guess endpoints or use the network-owner bearer API. Nexus is configured as Consider but disabled following a connection failure; its public search must be verified before enabling. Personio XML is now enabled for observed boards of size-eligible employers after protocol verification. Threshold's public page uses a different search-state format and stays disabled. Peerlist returned 403, Cuvette failed to connect and Unstop returned 403. No login, challenge or restricted-detail bypass is implemented. Job Opportunities API support is optional and disabled pending a user-supplied free account key.
 
-Its adapter fetches https://remotive.com/api/remote-jobs once per discovery call. It accepts technical internship/fresher titles with explicit Worldwide/Anywhere or India location text, requires a reviewed employer name, retains the Remotive application URL, and adds source attribution. Broad APAC or unspecified Remote text is excluded by that adapter.
+Its adapter fetches https://remotive.com/api/remote-jobs once per discovery call. It accepts technical internship/fresher titles with explicit Worldwide/Anywhere or India location text, requires a known eligible employer identity from SQLite or reviewed YAML, retains the Remotive application URL, and adds source attribution. Broad APAC or unspecified Remote text is excluded by that adapter.
 
 ### 3.3 Company discovery and research outside the primary source registry
 
 | Source | Current use |
 | --- | --- |
 | Startups Gallery | Called during hosted enquiry research. Reads the India directory and up to ten linked company profiles. Extracts the displayed employee band, employer website, careers link and supported ATS URLs. |
-| bharat.digital funding CSV | --hosted-daily now calls bounded funding research by default, unless OUTREACH_FUNDING_LEADS=false. Last 30 days, technical categories, pre-seed/seed/angel/Series A, at most ten employer matches. The CSV has names/funding/news references rather than verified employer domains and sizes: names are resolved only against existing reviewed evidence. Unresolved companies still require research; no domains or sizes are guessed. The standalone --funding-leads review command remains available. |
+| bharat.digital funding CSV | --hosted-daily now calls bounded funding research by default, unless OUTREACH_FUNDING_LEADS=false. Last 30 days, technical categories, pre-seed/seed/angel/Series A, at most ten employer matches. The CSV has names/funding/news references rather than verified employer domains and sizes: names are resolved against reviewed YAML and existing SQLite employer evidence. Unresolved companies still require research; no domains or sizes are guessed. The standalone --funding-leads review command remains available. |
 | Reviewed accelerator/portfolio references | Company-size configuration includes references such as Antler and Blume. These are curated evidence entries, rather than general-purpose portfolio crawlers. |
-| Entrackr | Manual funding research source. Discovered employers require website, size and careers verification before configuration. |
+| Funding RSS | Inc42 and YourStory public RSS now feed bounded article/domain research. Entrackr and CEO Dekho feed probes returned 404, so their entries stay disabled. Growth List has no verified free RSS integration. Funding stage is never converted into a verified employee count. |
 | Remote Rocketship | Manual research source. Working Nomads now has an enabled public-feed adapter. |
 | Google site searches | Manual ATS-board discovery. Verified boards can be added to company_sizes.yaml for recurring API checks. |
 
@@ -126,6 +126,16 @@ Each YAML entry includes its evidence source URL and, where available, the date 
 
 Portfolio evidence is stored in the normal company table and can be reused for feed identity/size lookup on later runs and cold research immediately. It does not overwrite the reviewed YAML. To export separate suggestions for manual review: `PYTHONPATH=src .venv/bin/python -m startup_agent.discovery.portfolio --export data/processed/company_sizes.suggested.yaml`. The exporter refuses a destination named company_sizes.yaml. Review provenance, dates, size and the actual employer careers URL before copying any entry.
 
+Additional enabled sources added by the improvement roadmap:
+
+| Source | Scope |
+| --- | --- |
+| SimplifyJobs Summer2027 | Active, visible public JSON listings with explicit India/worldwide permission and a resolved employer identity. Missing descriptions still need ATS enrichment; Remote alone is excluded. |
+| We Work Remotely | Public programming RSS with early-career titles, explicit India/worldwide geography, source credit and known employer evidence. |
+| Cutshort | Public JobPosting JSON-LD plus employer website and exact size labels from the page's own SSR configuration. No guessed enum mapping; recruiting-on-behalf-of-client listings are excluded. |
+| Weekday India freshers | Public Next.js jobs records on the verified India-filtered fresher page. Uses domain/size metadata, excluding anonymous partner-network employers. Short snippets may prevent direct routing. |
+| YC weekly seed | Recent W24 through F26 cohorts (translated to actual Winter/Summer/Fall year facet names), including non-hiring India/remote companies up to 100 staff. Eight pages of 100 per region query; one successful persisted seed per seven days. |
+
 ## 4. Discovery, normalization and storage
 
 The discovery pipeline resolves enabled adapters, isolates source exceptions, collects company/job objects, hydrates known company sizes and expands supported public ATS boards exposed by discovered links.
@@ -151,6 +161,10 @@ Company identity uses normalized websites and names. Job upserts attempt source-
 URL normalization removes common tracking parameters and trailing slashes. LivingAI's role anchors are preserved because multiple roles share one careers-page URL.
 
 The database retains historical records. General discovery does not uniformly mark every missing posting closed. Freshness checks vary by source. Re-fetching a source alone is insufficient evidence that every previously stored job remains open.
+
+ATS board tokens observed in company metadata, job links and employer pages are persisted in companies.ats_boards, then reused on later runs. The tracker never inserts invented board names. A failed or partial poll never counts as evidence that a job closed. Three successful complete snapshots missing a posting close it; jobs not re-seen for thirty days also close. Skipped/applied history is preserved, and a live old advert is not closed solely because of its publication date. An Alembic migration is required before running this version.
+
+The source_counts.json operational file now also carries stored/known-size/eligible/routed counters after preview or delivery diagnostics run. Counts reflect unique stored jobs and can differ from fetched cross-source copies.
 
 ## 5. Company-size gate
 
@@ -207,7 +221,7 @@ India-based internships and student placements can be fully eligible. The genera
 
 The Himalayas adapter additionally requires country metadata explicitly permitting India or an empty country restriction list representing worldwide availability. Its timezone filter accepts unrestricted listings or explicit UTC+5:30/UTC+05:30.
 
-The Remotive adapter has its own stricter location-text checks, but it is disabled.
+The enabled Remotive adapter has its own strict explicit India/worldwide location-text checks.
 
 A global comprehensive country/visa rule has not been implemented across all sources. For example, an EU restriction in unfamiliar wording can evade the general remote check. A job classified as eligible still requires reading the actual employer requirements.
 
@@ -217,7 +231,7 @@ Routes normally require EligibilityStatus.ELIGIBLE and a stored open job with an
 
 Potentially Eligible and Insufficient Information routes are excluded from the normal job digest. The specific exception is the Venomics careers internship with missing location, displayed as Confirm location.
 
-Graduate/entry-level full-time roles currently receive Potentially Eligible because the candidate is expected to graduate in June 2028. Consequently, even a well-matched junior role can be absent from Telegram. Searching entry-level listings expands discovery but does not automatically override this routing rule.
+Graduate/entry-level full-time roles currently receive Potentially Eligible because the candidate is expected to graduate in June 2028. Consequently, even a well-matched junior role can be absent from Telegram. Searching entry-level listings does not override this routing rule. A separate internship-enquiry path can use a Potentially Eligible junior role only for companies at or below 50 staff, explicit 0-1-year/no-experience requirements, acceptable India/worldwide geography and no other disqualifying eligibility outcome. The draft asks about an internship or part-time contribution rather than claiming full-time eligibility.
 
 Descriptions shorter than 80 characters generally prevent full eligibility. Unsupported technical roles and recruiter listings explicitly saying they hire for a client are also filtered by the routing checks.
 
@@ -256,7 +270,7 @@ The NYC 311 analytics report discussed on 18 November is currently outside the Y
 
 ## 9. Cold-enquiry research and drafting
 
-Hosted delivery combines discovered employers (including portfolio records), reviewed company records, bounded funding CSV matches and Startups Gallery India leads. It orders reviewed employers first and rotates a window of up to 20 eligible employers per run, so research can reach newly discovered companies. The cursor is stored in data/processed/enquiry_research_cursor.json.
+Hosted delivery combines discovered employers (including portfolio records), reviewed company records, bounded funding CSV matches and Startups Gallery India leads. It orders reviewed employers first and rotates a window of up to 80 eligible employers per run (configurable 1-100), so research can reach newly discovered companies. The cursor is stored in data/processed/enquiry_research_cursor.json.
 
 For each candidate it checks up to five employer pages: careers, homepage/footer, /contact, /about and /team. External portfolio careers URLs fall back to the employer's own /careers path for contact research. The shared HTTP helper supplies an identifying User-Agent, delays, retries and timeouts; it validates public addresses before every redirect and refuses cross-employer contact-page redirects. Linked ATS boards supply additional job records only through enabled platform adapters. No endless link crawling occurs.
 
@@ -269,9 +283,9 @@ Cold-email eligibility requires:
 5. No matching application route that takes priority for this company.
 6. No previous Skip/Mark Applied for the enquiry and no sent/sending/uncertain outreach for its recipient.
 
-The code accepts careers/jobs/hiring/recruitment/talent inboxes from mailto links or plain page text. A named email needs short nearby hiring context or an explicitly reviewed contact. Reviewed contacts must still appear on the current page. hr/people inboxes were not added without evidence. HN leads in data/processed/hn_contact_leads.json only prioritize contacts that independently satisfy current employer-page validation; the HN post itself never grants permission.
+The code accepts careers/jobs/hiring/recruitment/talent inboxes from mailto links or plain page text. A named email needs short nearby hiring context or an explicitly reviewed contact. Reviewed contacts must still appear on the current page. hr/people inboxes were not added without evidence. HN leads in data/processed/hn_contact_leads.json may independently support a contact when the new trust_hn_hiring_contacts option is enabled. Only current top-level monthly posts from a whoishiring thread, with matching employer-domain email and confirmed company size, qualify. This exception was explicitly approved in the new instructions.
 
-The sources.yaml enquiry_research option allow_generic_small_inboxes defaults to false. Explicitly enabling it allows hello/contact only when the entire published size is between 2 and 20 inclusive. A 1-10 or 11-50 band, unknown size or an open-ended count does not qualify. These inboxes remain disabled even when nearby text mentions hiring unless that flag and size condition both pass. The usual matching-role priority, history checks, resume attachment and individual approval remain in force.
+The sources.yaml enquiry_research option allow_generic_small_inboxes is now enabled as requested. It allows hello/contact/founders/team/apply/internships/engineering inboxes only when the entire published size is between 2 and 50 inclusive. A 1-10 or 51-200 band, unknown size or an open-ended count does not qualify. These inboxes remain disabled even when nearby text mentions hiring unless that flag and size condition both pass. The usual matching-role priority, history checks, resume attachment and individual approval remain in force.
 
 Enquiry delivery is email-only. Companies with only a careers form do not produce enquiry cards.
 
@@ -279,7 +293,7 @@ Limitations include heuristic detection of live openings, bounded page explorati
 
 Gemini uses the configured model gemini-3.1-flash-lite. The draft prompt supplies company context and selected candidate evidence, asks for concise subject/body JSON, and treats source text as factual input rather than instructions.
 
-Up to five new enquiry drafts are generated per run. Existing Sheet drafts, including edits, are reused. Missing Gemini credentials leave the new-draft budget at zero. A generation/quota error stops new generation for the rest of that digest; saved drafts can still be reused. Requests have a 25-second timeout and no automatic quota retry.
+Up to fifteen new enquiry drafts are generated per run (configurable downward). Existing Sheet drafts, including edits, are reused. Missing Gemini credentials leave the new-draft budget at zero. A generation/quota error stops new generation for the rest of that digest; saved drafts can still be reused. Requests have a 25-second timeout and no automatic quota retry.
 
 The draft subject is limited to 150 characters and the generated body to 120 words. Apps Script validates the full submitted draft again.
 
@@ -289,7 +303,7 @@ Python sends an HMAC-SHA256-signed JSON payload over HTTPS using OUTREACH_SYNC_S
 
 The CLI prints a per-source funnel in --digest-preview and discovery summaries. It labels stored normalized/eligible/routed inventory separately from last-fetch counts in data/processed/source_counts.json. Raw counts are available on new feed/portfolio adapters; older adapters report their returned records. Deduplicated jobs retain their stored source, so cross-source copies can show fetched records but zero stored records for the later source. Missing descriptions, unknown/cross-cap sizes and eligibility failures remain real exclusions. Routed counts precede Apps Script's final saved-action suppression.
 
-At most 100 cards are included in a batch. Ordering leaves the first 20 positions for job cards, then enquiries, then remaining jobs. Apps Script sends at most 30 review cards per delivery call.
+At most 100 cards are included in a batch. Ordering reserves the first 15 positions for job cards, followed by up to 15 enquiries, then remaining jobs. Apps Script sends at most 30 review cards per delivery call.
 
 The private Sheet named Imported Outreach History stores:
 
@@ -411,7 +425,7 @@ For a code/source update, synchronize the intended committed files to the VM, in
 2. Source listings can be duplicated, stale, senior, international or already handled. Raw counts are larger than the usable shortlist.
 3. Unknown-size companies are excluded. Researching and adding evidence can unlock listings already present in SQLite.
 4. Junior/fresher full-time discovery is broader than actual Telegram routing because graduate roles currently receive Potentially Eligible.
-5. Research coverage is bounded. Startups Gallery inspects ten profiles; enquiry research rotates twenty eligible employers and up to five current employer pages per call. Three Consider boards scan at most 75 company groups each. Supply is not guaranteed to meet 25-30 attempts per day.
+5. Research coverage is bounded. Startups Gallery rotates sixty profiles; enquiry research rotates eighty eligible employers and up to five current employer pages per call, with a fifteen-minute request budget. Seven Consider boards default to five pages of ten company groups for each of two location queries. Daily stored-ATS polling rotates at most eighty boards; immediate expansion adds at most forty. Discovery has a fifteen-minute budget, with five more minutes allowed for immediate expansion. Supply is not guaranteed to meet 25-30 attempts per day.
 6. Published hiring contacts are sparse and require current website evidence. Some employers offer only forms.
 7. The cold-enquiry pipeline has produced zero drafts in recent verified runs.
 8. Website selector changes and rate limits can cause partial source results. The HTTP helper retries some network and transient-status failures, while the discovery pipeline isolates source failures.
@@ -422,7 +436,7 @@ For a code/source update, synchronize the intended committed files to the VM, in
 13. Human approval is required for sending each enquiry. Application form submission remains manual.
 14. The profile does not currently contain a general company-name blacklist such as Canva. The employee-count gate is the principal mechanism excluding large employers.
 15. Getro access is blocked/unverified and remains disabled. Consider's public UI search is unofficial and may change. No private/bearer API is used. XML/JSON endpoints that redirect or change shape fail safely rather than being interpreted as valid empty boards.
-16. Funding entries with unresolved domain/size cannot automatically become cold targets. HN contacts without employer-page hiring evidence remain unverified. None of these additions bypasses those gates.
+16. Funding entries with unresolved domain/size cannot automatically become cold targets. Funding stage is not a size estimate. HN contacts can qualify under the separately approved current-post policy; arbitrary posts, replies, stale evidence and other-domain emails remain excluded.
 
 ## 17. Implementation map
 
@@ -433,7 +447,9 @@ All paths below are relative to the repository root.
 | CLI and orchestration | startup-outreach-agent/src/startup_agent/main.py |
 | Discovery orchestration and ATS expansion | startup-outreach-agent/src/startup_agent/discovery/pipeline.py |
 | Source adapters | startup-outreach-agent/src/startup_agent/discovery/ |
-| New portfolio, HN and remote adapters | discovery/portfolio.py, hn_hiring.py and remote_feeds.py under the Python package |
+| New source families | discovery/portfolio.py, hn_hiring.py, remote_feeds.py, community_feeds.py, india_boards.py, structured_jobs.py, funding_feeds.py and optional job_opportunities.py |
+| ATS persistence and closure | discovery/board_tracking.py; companies.ats_boards and jobs.missing_ats_polls; Alembic revision 61d8c09ea421 |
+| Stable scheduled run identity | startup-outreach-agent/src/startup_agent/delivery_slots.py |
 | Additional ATS protocols | startup-outreach-agent/src/startup_agent/discovery/public_ats.py and direct_ats.py |
 | Funnel and signed zero-card summary | startup-outreach-agent/src/startup_agent/funnel.py, hosted_delivery.py and hosting/apps-script/Code.gs |
 | Public-address and bounded HTTP fetching | startup-outreach-agent/src/startup_agent/utils/http_client.py |

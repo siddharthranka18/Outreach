@@ -12,7 +12,7 @@ from startup_agent.routing import build_outreach_routes
 
 def funnel_source(name):
     platform = name.split(":", 1)[0]
-    if platform in {"workable", "breezy", "teamtailor", "bamboohr", "personio"}:
+    if platform in {"workable", "breezy", "teamtailor", "bamboohr", "personio", "freshteam"}:
         return "ats_" + platform
     if platform in {"greenhouse", "ashby", "lever", "recruitee"}:
         return "company_career_sites"
@@ -61,7 +61,16 @@ def source_funnel(session, settings):
             raw_reasons = count.get("rejections", {})
             row.setdefault("rejections", Counter()).update(raw_reasons)
             reasons.update(raw_reasons)
-    return {"sources": counts, "rejections": dict(reasons.most_common(3))}
+    result={"sources": counts, "rejections": dict(reasons.most_common(3))}
+    # Keep the machine-readable last-fetch record useful to operations too.
+    if path.is_file():
+        for name,row in counts.items():
+            record=fetched.get(name,{})
+            if not isinstance(record,dict):record={"fetched":record}
+            record.update({key:row[key] for key in ('normalized','size_known','size_eligible','role_eligible','routed')})
+            fetched[name]=record
+        path.write_text(json.dumps(fetched,indent=2),encoding='utf-8')
+    return result
 
 
 def format_funnel(funnel):

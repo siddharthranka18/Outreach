@@ -1,16 +1,17 @@
 """Additional keyless ATS protocols, verified on public employer boards 2026-11-20."""
 import json
 import re
+import html
 from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
 from startup_agent.models.job import Job
 from startup_agent.utils.normalizers import normalize_job_url
 
-PLATFORMS = {"workable", "breezy", "teamtailor", "bamboohr", "personio"}
+PLATFORMS = {"workable", "breezy", "teamtailor", "bamboohr", "personio", "freshteam"}
 
 
 def text(value):
-    return BeautifulSoup(str(value or ""), "html.parser").get_text(" ", strip=True)
+    return BeautifulSoup(html.unescape(str(value or "")), "html.parser").get_text(" ", strip=True)
 
 
 def fetch_public_ats(target, client):
@@ -58,6 +59,22 @@ def fetch_public_ats(target, client):
             location = ", ".join(str(location.get(k) or "") for k in ("city", "state", "country", "addressCountry")).strip(", ")
             rows.append((details["jobOpeningName"], details.get("jobOpeningShareUrl") or f"https://{board}.bamboohr.com/careers/{identifier}",
                 location, details.get("description"), details.get("employmentStatusLabel"), identifier))
+    elif platform == "freshteam":
+        from startup_agent.discovery.structured_jobs import jobposting_nodes
+        root = f"https://{board}.freshteam.com/jobs"
+        page = BeautifulSoup(client.get(root).text, "html.parser")
+        postings = jobposting_nodes(page)
+        # Some employer lists link to individual pages containing the JSON-LD.
+        for link in list(dict.fromkeys(a["href"] for a in page.select('a[href]')
+                    if re.fullmatch(r"(?:https://"+re.escape(board)+r"\.freshteam\.com)?/jobs/[A-Za-z0-9_-]+(?:/[^?#]*)?", a["href"])))[:30]:
+            from urllib.parse import urljoin
+            postings.extend(jobposting_nodes(BeautifulSoup(client.get(urljoin(root, link)).text, "html.parser")))
+        for item in postings:
+            locations = item.get("jobLocation") or []
+            if isinstance(locations, dict): locations = [locations]
+            location = " / ".join(", ".join(str(v) for v in (p.get("address") or {}).values()) for p in locations)
+            rows.append((item.get("title"), item.get("url"), location,
+                         item.get("description"), ', '.join(item['employmentType']) if isinstance(item.get('employmentType'),list) else item.get("employmentType"), str(item.get("identifier") or item.get("url"))))
     elif platform in {"teamtailor", "personio"}:
         url = f"https://{board}.teamtailor.com/jobs.rss?per_page=100" if platform == "teamtailor" else f"https://{board}.jobs.personio.de/xml"
         doc = BeautifulSoup(client.get(url).text, "xml")

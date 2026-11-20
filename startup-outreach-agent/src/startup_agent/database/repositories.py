@@ -24,6 +24,9 @@ INDIRECT_COMPANY_HOSTS = {
     "wellfound.com",
     "remotive.com",
     "andhrastartupmap.in",
+    "ycombinator.com", "workatastartup.com", "himalayas.app", "remoteok.com", "jobicy.com",
+    "workingnomads.com", "weworkremotely.com", "news.ycombinator.com", "cutshort.io", "peerlist.io",
+    "apply.workable.com", "jobs.weekday.works", "startups.gallery",
 }
 
 
@@ -33,7 +36,8 @@ def _is_indirect_company_url(value: Optional[str]) -> bool:
         return False
     parsed = urlparse(value if "://" in value else f"https://{value}")
     host = parsed.netloc.lower().removeprefix("www.")
-    return host in INDIRECT_COMPANY_HOSTS or host.endswith(".recruitee.com")
+    return host in INDIRECT_COMPANY_HOSTS or any(host.endswith('.'+suffix) for suffix in
+        ('recruitee.com','breezy.hr','teamtailor.com','bamboohr.com','freshteam.com','jobs.personio.de'))
 
 
 class CompanyRepository:

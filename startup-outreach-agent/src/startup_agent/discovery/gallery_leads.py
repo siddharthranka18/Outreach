@@ -11,7 +11,7 @@ from startup_agent.utils.http_client import HttpClient
 INDIA_DIRECTORY = "https://startups.gallery/categories/locations/countries/india"
 
 
-def gallery_leads(client: HttpClient) -> list[dict]:
+def gallery_leads(client: HttpClient, max_profiles=60, offset=0) -> list[dict]:
     try:
         directory = BeautifulSoup(client.get(INDIA_DIRECTORY).text, "html.parser")
     except httpx.HTTPError:
@@ -23,7 +23,9 @@ def gallery_leads(client: HttpClient) -> list[dict]:
         if parsed.netloc == "startups.gallery" and re.fullmatch(r"/companies/[a-z0-9-]+/?", parsed.path):
             urls[f"https://startups.gallery{parsed.path.rstrip('/')}"] = None
     leads = []
-    for url in list(urls)[:10]:
+    profile_urls=list(urls)
+    start=offset % len(profile_urls) if profile_urls else 0
+    for url in (profile_urls[start:]+profile_urls[:start])[:min(max_profiles,100)]:
         try:
             page = BeautifulSoup(client.get(url).text, "html.parser")
         except httpx.HTTPError:
@@ -43,7 +45,7 @@ def gallery_leads(client: HttpClient) -> list[dict]:
         leads.append({
             "company_name": heading.get_text(" ", strip=True),
             "website": links["visit website"],
-            "careers_url": links.get("view jobs"),
+            "careers_url": links.get("view jobs") or links["visit website"].rstrip('/')+'/careers',
             "employee_count": "-".join(size.groups()),
             "source_url": url,
             "ats_urls": [

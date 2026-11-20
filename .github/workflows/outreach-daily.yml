@@ -15,15 +15,7 @@ on:
         description: Use the active IST delivery window
         type: boolean
         default: false
-  schedule:
-    - cron: '45 3 * * *' # 09:15 IST
-    - cron: '5 4 * * *' # 09:35 IST backup
-    - cron: '27 4 * * *' # 09:57 IST backup
-    - cron: '11 5 * * *' # 10:41 IST backup
-    - cron: '45 12 * * *' # 18:15 IST
-    - cron: '5 13 * * *' # 18:35 IST backup
-    - cron: '27 13 * * *' # 18:57 IST backup
-    - cron: '11 14 * * *' # 19:41 IST backup
+  # Oracle systemd owns the schedule. Keep GitHub manual-only to avoid duplicate runs.
 
 permissions:
   contents: read
@@ -36,7 +28,7 @@ jobs:
   discover:
     if: vars.OUTREACH_HOSTED_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: startup-outreach-agent

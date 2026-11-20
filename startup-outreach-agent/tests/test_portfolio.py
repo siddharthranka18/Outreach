@@ -38,3 +38,18 @@ def test_consider_bounded_and_no_token_in_persisted_data(tmp_path):
 def test_getro_unverified_cannot_silently_return_success():
     with pytest.raises(ValueError):
         PortfolioDiscoverySource("vc_blocked", "https://board.example", {"provider":"getro"}).discover()
+
+def test_later_page_failure_preserves_companies_and_board_links():
+    import httpx
+    data=json.loads(FIXTURE.read_text())
+    data['meta']={'sequence':'next'}
+    data['jobs'][0]['jobs'].append({'title':'Senior Software Engineer','locations':['India'],
+        'applyUrl':'https://jobs.ashbyhq.com/studio/123'})
+    client=Mock()
+    client.get.return_value.text='window.serverInitialData = {"board":{"id":"test"},"csrfToken":"temporary"};'
+    client.post.return_value.json.side_effect=[data,httpx.ReadTimeout('fixture timeout')]
+    source=PortfolioDiscoverySource('vc_test','https://board.example',{'provider':'consider','max_pages':5},http_client=client)
+    result=source.discover()
+    assert len(result.companies)==1 and len(result.jobs)==1
+    assert 'https://jobs.ashbyhq.com/studio/123' in result.companies[0].ats_urls
+    assert source.partial_error=='ReadTimeout'

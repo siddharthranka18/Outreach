@@ -1,11 +1,129 @@
 version: "1.0"
 sources:
+  - name: job_opportunities
+    display_name: Job Opportunities API optional free key
+    type: public_jobs_api
+    enabled: false
+    url: https://api.jobopportunitiesapi.org/v1/jobs
+    description: Job rows require a free account key; opt-in JOA_API_KEY and one 20-record India page only.
+  - name: vc_sequoia
+    display_name: Sequoia Capital US
+    type: vc_portfolio
+    enabled: true
+    url: https://jobs.sequoiacap.com
+    options: {provider: consider, max_pages: 5, location_queries: [[India], [Worldwide]]}
+    description: Verified public Consider search; India/worldwide eligibility checked locally.
+  - name: vc_firstround
+    display_name: First Round Capital
+    type: vc_portfolio
+    enabled: true
+    url: https://jobs.firstround.com
+    options: {provider: consider, max_pages: 5, location_queries: [[India], [Worldwide]]}
+    description: Verified public Consider search; India/worldwide eligibility checked locally.
+  - name: cuvette
+    display_name: Cuvette
+    type: structured_board
+    enabled: false
+    url: https://cuvette.tech
+    options: {paid_only: true}
+    description: Connection failed; no verifiable public job feed. Paid-only guardrails required before enabling.
+  - name: unstop
+    display_name: Unstop
+    type: structured_board
+    enabled: false
+    url: https://unstop.com/internships
+    options: {paid_only: true}
+    description: Public request blocked with 403; no access bypass attempted.
+  - name: yc_seed
+    display_name: YC recent batches weekly company seed
+    type: directory
+    enabled: true
+    options:
+      batches: [W24, S24, F24, W25, S25, F25, W26, S26, F26]
+    description: Weekly bounded directory pagination; India/remote companies up to 100 staff including non-hiring startups.
+  - {name: ats_freshteam, display_name: Freshteam, type: ats_platform, enabled: true, description: Observed employer jobs pages with public JobPosting JSON-LD.}
+  - name: simplify_summer2027
+    display_name: SimplifyJobs Summer 2027
+    type: community_feed
+    enabled: true
+    url: https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json
+    description: Active visible internships with explicit India/worldwide permission; known employer evidence required.
+  - name: we_work_remotely
+    display_name: We Work Remotely
+    type: community_feed
+    enabled: true
+    url: https://weworkremotely.com/categories/remote-programming-jobs.rss
+    description: Public programming RSS; strict early career and explicit India/worldwide permission.
+  - name: cutshort
+    display_name: Cutshort
+    type: india_board
+    enabled: true
+    url: https://cutshort.io/jobs/software-development-jobs
+    description: Public job JSON-LD and published employer size labels from SSR configuration; no login.
+  - name: weekday
+    display_name: Weekday India fresher jobs
+    type: india_board
+    enabled: true
+    url: https://www.weekday.works/jobs/it-fresher-jobs
+    options: {country: India}
+    description: Public SSR records; known employer domain required and no partner-network guesses.
+  - name: peerlist
+    display_name: Peerlist
+    type: structured_board
+    enabled: false
+    url: https://peerlist.io/jobs
+    description: Public client returned 403; disabled until access and JobPosting records can be verified.
+  - name: funding_inc42
+    display_name: Inc42 funding RSS
+    type: funding_feed
+    enabled: true
+    url: https://inc42.com/feed/
+    description: Recent early-stage technical funding articles; observed domains only; unknown size remains excluded.
+  - name: funding_yourstory
+    display_name: YourStory funding RSS
+    type: funding_feed
+    enabled: true
+    url: https://yourstory.com/feed
+    description: Recent early-stage technical funding articles; observed domains only; unknown size remains excluded.
+  - name: funding_entrackr
+    display_name: Entrackr funding
+    type: funding_feed
+    enabled: false
+    url: https://entrackr.com/feed/
+    description: Feed returned 404; no working feed verified.
+  - name: funding_ceodekho
+    display_name: CEO Dekho funding
+    type: funding_feed
+    enabled: false
+    url: https://ceodekho.com/feed/
+    description: Feed returned 404; no working feed verified.
+  - name: vc_bain
+    display_name: Bain Capital Ventures
+    type: vc_portfolio
+    enabled: true
+    url: https://jobs.baincapitalventures.com
+    options: {provider: consider, max_pages: 5, location_queries: [[India], [Worldwide]]}
+    description: Public Consider India search protocol verified.
+  - name: vc_courtside
+    display_name: Courtside Ventures
+    type: vc_portfolio
+    enabled: true
+    url: https://jobs.courtsidevc.com
+    options: {provider: consider, max_pages: 5, location_queries: [[India], [Worldwide]]}
+    description: Public Consider India search protocol verified.
+  - name: vc_threshold
+    display_name: Threshold Ventures
+    type: vc_portfolio
+    enabled: false
+    url: https://consider.com/boards/vc/threshold-ventures
+    options: {provider: consider, max_pages: 5, location_queries: [[India], [Worldwide]]}
+    description: Public page uses a different board state; search request not yet verified.
   - name: enquiry_research
     display_name: Employer contact research
     type: enquiry_options
     enabled: true
-    description: Five employer pages; generic inboxes require an explicit opt-in and published 2-20 staff.
-    options: {allow_generic_small_inboxes: false}
+    description: Five employer pages; selected general inboxes for published 2-50 staff and current monthly HN hiring evidence.
+    options: {allow_generic_small_inboxes: true, trust_hn_hiring_contacts: true, max_employers: 80, max_new_drafts: 15, gallery_profiles: 60, max_seconds: 900}
   - {name: remoteok, display_name: Remote OK, type: public_jobs_api, enabled: true, url: 'https://remoteok.com/api', description: Explicit India/worldwide technical early-career titles with reviewed employers.}
   - {name: jobicy, display_name: Jobicy, type: public_jobs_api, enabled: true, url: 'https://jobicy.com/api/v2/remote-jobs', description: Explicit India/worldwide technical early-career titles with reviewed employers.}
   - {name: working_nomads, display_name: Working Nomads, type: public_jobs_api, enabled: true, url: 'https://www.workingnomads.com/api/exposed_jobs/', description: Explicit India/worldwide technical early-career titles with reviewed employers.}
@@ -19,27 +137,27 @@ sources:
   - {name: ats_breezy, display_name: Breezy HR, type: ats_platform, enabled: true, description: Public JSON and bounded job descriptions.}
   - {name: ats_teamtailor, display_name: Teamtailor, type: ats_platform, enabled: true, description: Public RSS; JSON API requires a key.}
   - {name: ats_bamboohr, display_name: BambooHR, type: ats_platform, enabled: true, description: Public careers list and detail JSON.}
-  - {name: ats_personio, display_name: Personio, type: ats_platform, enabled: false, description: Optional XML feed; leave disabled until employer board verified.}
+  - {name: ats_personio, display_name: Personio, type: ats_platform, enabled: true, description: Public XML verified; only observed boards of size-eligible employers are polled.}
   - name: vc_peakxv
     display_name: Peak XV portfolio
     type: vc_portfolio
     enabled: true
     url: https://careers.peakxv.com
-    options: {provider: consider, max_pages: 3}
+    options: {provider: consider, max_pages: 5, location_queries: [[India], [Worldwide]]}
     description: Public Consider search, India technical early-career roles.
   - name: vc_lightspeed
     display_name: Lightspeed portfolio
     type: vc_portfolio
     enabled: true
     url: https://jobs.lsvp.com
-    options: {provider: consider, max_pages: 3}
+    options: {provider: consider, max_pages: 5, location_queries: [[India], [Worldwide]]}
     description: Public Consider search; full published size bands retained.
   - name: vc_bessemer
     display_name: Bessemer portfolio
     type: vc_portfolio
     enabled: true
     url: https://jobs.bvp.com
-    options: {provider: consider, max_pages: 3}
+    options: {provider: consider, max_pages: 5, location_queries: [[India], [Worldwide]]}
     description: Public Consider search; full published size bands retained.
   - name: vc_nexus
     display_name: Nexus portfolio
@@ -92,7 +210,7 @@ sources:
     display_name: "Remotive"
     type: "public_jobs_api"
     url: "https://remotive.com/api/remote-jobs"
-    enabled: false
+    enabled: true
     description: "Trial source for India-eligible technical fresher roles at size-reviewed employers."
 
   - name: "hasjob"

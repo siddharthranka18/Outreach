@@ -21,6 +21,7 @@ class Company:
     funding_stage: Optional[str] = None
     careers_url: Optional[str] = None
     hiring_status: Optional[str] = None
+    ats_urls: list[str] = field(default_factory=list)
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

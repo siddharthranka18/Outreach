@@ -3,6 +3,7 @@
 from datetime import datetime
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
@@ -61,7 +62,7 @@ def extract_ats_target(
     if host == "apply.workable.com" and path_parts and path_parts[0] not in {"j", "api"}:
         platform, board_token = "workable", path_parts[0]
     for suffix, kind in (("breezy.hr", "breezy"), ("teamtailor.com", "teamtailor"),
-                         ("bamboohr.com", "bamboohr"), ("jobs.personio.de", "personio")):
+                         ("bamboohr.com", "bamboohr"), ("jobs.personio.de", "personio"), ("freshteam.com", "freshteam")):
         if parsed.hostname and re.fullmatch(r"[a-z0-9-]+\." + re.escape(suffix), parsed.hostname):
             platform, board_token = kind, parsed.hostname.split(".")[0]
 
@@ -93,7 +94,9 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
         super().__init__(name=name, enabled=enabled)
         self.targets = targets if targets is not None else DEFAULT_ATS_TARGETS
         self.http_client = http_client or HttpClient(public_only=True)
-        self.platforms = set(platforms) if platforms is not None else {"greenhouse", "ashby", "lever", "recruitee", "workable", "breezy", "teamtailor", "bamboohr"}
+        self.platforms = set(platforms) if platforms is not None else {"greenhouse", "ashby", "lever", "recruitee", "workable", "breezy", "teamtailor", "bamboohr", "freshteam"}
+        self.successful_polls = []
+        self.attempted_boards = 0
 
     def _discover_greenhouse(self, target: Dict[str, str]) -> List[Job]:
         """Fetch jobs from public Greenhouse boards API."""
@@ -104,7 +107,8 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
 
         resp = self.http_client.get(url)
         data = resp.json()
-        raw_jobs = data.get("jobs", [])
+        raw_jobs = data["jobs"]
+        if not isinstance(raw_jobs,list):raise ValueError('Greenhouse jobs shape changed')
 
         jobs: List[Job] = []
         for raw in raw_jobs:
@@ -153,7 +157,8 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
 
         resp = self.http_client.get(url)
         data = resp.json()
-        raw_jobs = data.get("jobs", [])
+        raw_jobs = data["jobs"]
+        if not isinstance(raw_jobs,list):raise ValueError('Ashby jobs shape changed')
 
         jobs: List[Job] = []
         for raw in raw_jobs:
@@ -196,7 +201,7 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
         resp = self.http_client.get(url)
         data = resp.json()
         if not isinstance(data, list):
-            return []
+            raise ValueError('Lever jobs shape changed')
 
         jobs: List[Job] = []
         for raw in data:
@@ -233,7 +238,9 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
         board = target["board_token"]
         url = f"https://{board}.recruitee.com/api/offers"
         jobs = []
-        for offer in self.http_client.get(url).json().get("offers", []):
+        offers=self.http_client.get(url).json()["offers"]
+        if not isinstance(offers,list):raise ValueError('Recruitee offers shape changed')
+        for offer in offers:
             title = offer.get("title")
             job_url = offer.get("careers_url") or offer.get("careers_apply_url")
             if not title or not job_url or offer.get("status") not in (None, "published"):
@@ -285,6 +292,11 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
         seen_companies = set()
 
         for target in self.targets:
+            deadline=getattr(self.http_client,'deadline',None)
+            if isinstance(deadline,(int,float)) and time.monotonic()>=deadline:
+                logger.info('ATS time budget reached after %d boards.',self.attempted_boards)
+                break
+            self.attempted_boards+=1
             platform = target.get("platform", "").lower()
             company_name = target.get("company_name", "")
             website = target.get("website", "")
@@ -312,6 +324,9 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
             try:
                 target_jobs = self.fetch_board_jobs(target)
                 jobs.extend(target_jobs)
+                # Only protocols returning a complete, unpaginated snapshot may count absence.
+                if platform in {"greenhouse", "ashby", "lever", "recruitee", "workable", "personio"}:
+                    self.successful_polls.append((target, target_jobs))
                 logger.info("Discovered %d jobs for %s via %s", len(target_jobs), company_name, platform)
             except Exception as exc:
                 logger.warning("Failed fetching ATS jobs for %s (%s): %s", company_name, platform, exc)

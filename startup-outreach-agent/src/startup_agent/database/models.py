@@ -38,6 +38,7 @@ class CompanyModel(Base):
     funding_stage: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     careers_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     hiring_status: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    ats_boards: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -102,6 +103,7 @@ class JobModel(Base):
         nullable=False,
     )
     status: Mapped[str] = mapped_column(String(50), default="open", nullable=False)
+    missing_ats_polls: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

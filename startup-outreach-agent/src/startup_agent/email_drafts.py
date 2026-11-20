@@ -103,8 +103,10 @@ def generate_email_draft(
         facts["published_company_context"] = enquiry_context
         enquiry_instruction = (
             " Ask whether the engineering team accepts internship enquiries. "
-            "There is no confirmed matching opening. Use a specific company detail only "
-            "when supported by published_company_context. The sender will attach their resume."
+            "There is no confirmed matching internship opening. If the context mentions an open junior full-time role, "
+            "ask about an internship or part-time contribution instead; do not imply full-time eligibility. Use a specific company detail only "
+            "when supported by published_company_context. The candidate is based in India: ask about remote-from-India work "
+            "when the company location is uncertain, rather than assuming overseas work authorization. The sender will attach their resume."
         )
     try:
         response = httpx.post(

@@ -5,6 +5,7 @@ import logging
 import time
 import json
 from collections import Counter
+from datetime import datetime,timezone
 import yaml
 from typing import Dict, List, Optional, Tuple, Type
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ from startup_agent.database.models import CompanyModel
 from startup_agent.config.settings import Settings
 from startup_agent.database.engine import create_db_engine
 from startup_agent.database.repositories import CompanyRepository, JobRepository
+from startup_agent.database.repositories import _is_indirect_company_url
 from startup_agent.database.session import create_session_factory, session_scope
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
 from startup_agent.discovery.portfolio import PortfolioDiscoverySource
@@ -40,6 +42,12 @@ from startup_agent.matching.startup_filter import (
 )
 from startup_agent.utils.http_client import HttpClient
 from startup_agent.funnel import funnel_source
+from startup_agent.discovery.board_tracking import remember_boards, stored_targets, sweep_stale
+from startup_agent.discovery.community_feeds import CommunityFeedSource
+from startup_agent.discovery.india_boards import IndiaBoardSource
+from startup_agent.discovery.structured_jobs import StructuredBoardSource
+from startup_agent.discovery.funding_feeds import FundingFeedSource
+from startup_agent.discovery.job_opportunities import JobOpportunitiesSource
 
 logger = logging.getLogger("startup_agent.discovery.pipeline")
 
@@ -103,6 +111,8 @@ class DiscoveryPipeline:
         self.session = session
         self.custom_adapters = custom_adapters
         self.ats_http_client = ats_http_client
+        self.successful_polls = []
+        self.ats_deadline = time.monotonic()+600
         flags = {s.name.removeprefix("ats_"): s.enabled for s in self.settings.sources if s.type == "ats_platform"}
         self.ats_platforms = {"greenhouse", "ashby", "lever", "recruitee"} | {name for name, enabled in flags.items() if enabled}
         if not flags:  # Preserve programmatic configurations predating platform flags.
@@ -139,18 +149,30 @@ class DiscoveryPipeline:
             adapter_cls = SOURCE_ADAPTER_REGISTRY.get(src.name)
             if src.type == "vc_portfolio":
                 adapters.append(PortfolioDiscoverySource(src.name, src.url, src.options))
+            elif src.name=='job_opportunities':
+                adapters.append(JobOpportunitiesSource(employers))
+            elif src.type == "community_feed":
+                adapters.append(CommunityFeedSource(src.name,src.url,employers))
+            elif src.type == "india_board":
+                adapters.append(IndiaBoardSource(src.name,src.url,employers,src.options))
+            elif src.type == "structured_board":
+                adapters.append(StructuredBoardSource(src.name,src.url,employers,src.options))
+            elif src.type == "funding_feed":
+                adapters.append(FundingFeedSource(src.name,src.url,employers,src.options))
+            elif src.name == "yc_seed":
+                adapters.append(YCombinatorDiscoverySource(name=src.name, max_companies=100,max_employees=100,
+                    include_jobs=False,include_non_hiring=True,max_pages=8,batches=src.options.get('batches'),
+                    target_region_groups=[['India'],['Fully Remote']],
+                    seed_state_path=self.settings.data_dir/'processed/yc_seed_checked_at.txt'))
             elif src.name in FEEDS:
                 adapters.append(RemoteFeedDiscoverySource(employers, src.name))
             elif src.name == "hn_hiring":
                 adapters.append(HnHiringDiscoverySource(employers, leads_path=self.settings.data_dir / "processed/hn_contact_leads.json"))
             elif adapter_cls in (HimalayasDiscoverySource, RemotiveDiscoverySource):
-                reviewed = [
-                    (domain, evidence) for domain, evidence in self.size_evidence.items()
-                    if self.startup_filter.evaluate(evidence.get("employee_count")).status
-                    == StartupEligibilityStatus.ELIGIBLE
-                ]
-                by_name = {normalize_name(evidence["company_name"]): (domain, evidence)
-                           for domain, evidence in reviewed if evidence.get("company_name")}
+                reviewed = [(domain, e) for domain, e in self.size_evidence.items()
+                            if self.startup_filter.evaluate(e.get("employee_count")).status == StartupEligibilityStatus.ELIGIBLE]
+                by_name = {name: (domain, e) for name, (domain, e) in employers.items()
+                           if self.startup_filter.evaluate(e.get("employee_count")).status == StartupEligibilityStatus.ELIGIBLE}
                 if adapter_cls is HimalayasDiscoverySource:
                     by_slug = {evidence["himalayas_slug"]: (domain, evidence)
                                for domain, evidence in reviewed if evidence.get("himalayas_slug")}
@@ -158,7 +180,7 @@ class DiscoveryPipeline:
                 else:
                     adapters.append(RemotiveDiscoverySource(by_name, name=src.name))
             elif adapter_cls is DirectAtsDiscoverySource:
-                targets = []
+                targets = self._stored_ats_targets()
                 for domain, evidence in self.size_evidence.items():
                     board_url = evidence.get("ats_url")
                     company_name = evidence.get("company_name")
@@ -171,21 +193,42 @@ class DiscoveryPipeline:
                     if target:
                         target["source_url"] = board_url
                         targets.append(target)
+                targets = list({(t["platform"],t["board_token"]):t for t in targets}.values())
+                cursor_path=self.settings.data_dir/'processed/ats_poll_cursor.txt'
+                try:cursor=int(cursor_path.read_text())
+                except (OSError,ValueError):cursor=0
+                if targets:
+                    offset=cursor % len(targets)
+                    targets=(targets[offset:]+targets[:offset])[:80]
+                client=self.ats_http_client or HttpClient(public_only=True,timeout=10,max_retries=1)
+                client.deadline=self.ats_deadline
                 adapters.append(DirectAtsDiscoverySource(
-                    name=src.name, targets=targets, http_client=self.ats_http_client,
+                    name=src.name, targets=targets, http_client=client,
                     platforms=self.ats_platforms,
                 ))
+                adapters[-1].cursor_path=cursor_path
+                adapters[-1].cursor_offset=cursor
             elif adapter_cls:
                 adapters.append(adapter_cls(name=src.name, enabled=True))
             else:
                 logger.warning("No registered discovery adapter for source: '%s'", src.name)
-        return adapters
+        # Enrich identities before feeds that otherwise cannot resolve a new employer.
+        return sorted(adapters,key=lambda a:0 if isinstance(a,(PortfolioDiscoverySource,YCombinatorDiscoverySource))
+                      else 2 if isinstance(a,DirectAtsDiscoverySource) else 1)
+
+    def _stored_ats_targets(self):
+        if self.session is not None:
+            return stored_targets(self.session, self.ats_platforms)
+        factory = create_session_factory(create_db_engine(self.settings.database_url))
+        with factory() as session:
+            return stored_targets(session, self.ats_platforms)
 
     def _known_employers(self):
         """Reuse persisted portfolio evidence on later runs without auto-editing reviewed YAML."""
         employers = {}
         def collect(session):
             for company in session.scalars(select(CompanyModel)):
+                if _is_indirect_company_url(company.website):continue
                 domain = normalize_website(company.website).split("/", 1)[0]
                 if company.employee_count and company.source_url:
                     employers[company.normalized_name] = (domain, {
@@ -220,12 +263,20 @@ class DiscoveryPipeline:
         source_counts = {}
 
         # 1. Source Discovery Phase with Source-Level Isolation
+        discovery_deadline=time.monotonic()+900
         for adapter in adapters:
             summary.sources_attempted += 1
             logger.info("Starting discovery for source: '%s'...", adapter.name)
             source_counts[adapter.name] = {"fetched": 0, "rejections": {}, "error": ""}
+            if time.monotonic()>=discovery_deadline:
+                source_counts[adapter.name]['error']='Discovery time budget reached'
+                summary.sources_failed.append((adapter.name,'Discovery time budget reached'))
+                continue
+            if isinstance(getattr(adapter,'http_client',None),HttpClient):
+                adapter.http_client.deadline=min(discovery_deadline,time.monotonic()+(120 if isinstance(adapter,PortfolioDiscoverySource) else 600))
             try:
                 raw_result = adapter.discover()
+                self.successful_polls.extend(getattr(adapter, "successful_polls", []))
                 if isinstance(raw_result, DiscoveryResult):
                     discovered_cos = raw_result.companies
                     discovered_jbs = raw_result.jobs
@@ -238,9 +289,20 @@ class DiscoveryPipeline:
 
                 collected_companies.extend(discovered_cos)
                 collected_jobs.extend(discovered_jbs)
+                # Reuse evidence learned earlier in this same run, without a YAML edit.
+                for company in discovered_cos:
+                    if self.startup_filter.evaluate(company.employee_count).status == StartupEligibilityStatus.ELIGIBLE:
+                        evidence = {"employee_count":company.employee_count, "source_url":company.source_url,
+                                    "careers_url":company.careers_url}
+                        for next_adapter in adapters:
+                            mapping = getattr(next_adapter, "employers_by_name", None)
+                            if mapping is None:
+                                mapping = getattr(next_adapter,'employers',None)
+                            if isinstance(mapping, dict):
+                                mapping[company.normalized_name] = (company.normalized_website.split('/')[0], evidence)
                 source_counts[adapter.name] = {
                     "fetched": getattr(adapter, "fetched_count", len(discovered_jbs)),
-                    "rejections": dict(getattr(adapter, "rejections", {})), "error": "",
+                    "rejections": dict(getattr(adapter, "rejections", {})), "error": getattr(adapter,'partial_error',''),
                 }
                 summary.sources_successful += 1
                 logger.info(
@@ -250,7 +312,7 @@ class DiscoveryPipeline:
                     len(discovered_jbs),
                 )
             except Exception as exc:
-                logger.error("Source '%s' encountered an unhandled error: %s", adapter.name, exc, exc_info=True)
+                logger.warning("Source '%s' failed (%s); continuing with other sources.", adapter.name, type(exc).__name__)
                 summary.sources_failed.append((adapter.name, str(exc)))
                 source_counts[adapter.name]["error"] = type(exc).__name__
 
@@ -281,6 +343,13 @@ class DiscoveryPipeline:
                 self._persist_entities(session, collected_companies, collected_jobs, summary)
 
         summary.duration_seconds = round(time.time() - start_time, 2)
+        for adapter in adapters:
+            if getattr(adapter,'seed_completed',False):
+                adapter.seed_state_path.parent.mkdir(parents=True,exist_ok=True)
+                adapter.seed_state_path.write_text(datetime.now(timezone.utc).isoformat())
+            if getattr(adapter,'cursor_path',None) and getattr(adapter,'attempted_boards',0):
+                adapter.cursor_path.parent.mkdir(parents=True,exist_ok=True)
+                adapter.cursor_path.write_text(str(adapter.cursor_offset+adapter.attempted_boards))
         self.settings.data_dir.joinpath("processed").mkdir(parents=True, exist_ok=True)
         adapter_names = set(source_counts)
         for name, count in Counter(job.source_name for job in collected_jobs).items():
@@ -396,13 +465,17 @@ class DiscoveryPipeline:
             return DiscoveryResult(), 0
 
         logger.info("Auto-expanding %d public ATS boards from small-startup listings.", len(targets))
+        client=self.ats_http_client or HttpClient(public_only=True,timeout=10,max_retries=1)
+        client.deadline=time.monotonic()+300
         adapter = DirectAtsDiscoverySource(
             name="auto_discovered_ats",
-            targets=targets,
-            http_client=self.ats_http_client,
+            targets=targets[:40],
+            http_client=client,
             platforms=self.ats_platforms,
         )
-        return adapter.discover(), len(targets)
+        result = adapter.discover()
+        self.successful_polls.extend(adapter.successful_polls)
+        return result, len(adapter.targets)
 
     def _persist_entities(
         self,
@@ -424,6 +497,7 @@ class DiscoveryPipeline:
             try:
                 with session.begin_nested():
                     model, is_new = company_repo.upsert_company_with_status(company)
+                    remember_boards(model, list(getattr(company,'ats_urls',[]))+[company.careers_url or ''])
                 if is_new:
                     summary.companies_inserted += 1
                 else:
@@ -468,12 +542,19 @@ class DiscoveryPipeline:
                         job.company_id = target_id
 
                     model, is_new = job_repo.upsert_job_with_status(job)
+                    company = session.get(CompanyModel, job.company_id)
+                    if company:
+                        remember_boards(company, [job.job_url])
                 if is_new:
                     summary.jobs_inserted += 1
                 else:
                     summary.jobs_updated += 1
             except Exception as exc:
                 logger.error("Failed to upsert job '%s': %s", job.job_title, exc)
+
+        for company in session.scalars(select(CompanyModel)):
+            remember_boards(company, [company.careers_url or ""])
+        logger.info("Freshness sweep closed %d unhandled jobs.", sweep_stale(session, self.successful_polls))
 
 
 def run_discovery_pipeline(

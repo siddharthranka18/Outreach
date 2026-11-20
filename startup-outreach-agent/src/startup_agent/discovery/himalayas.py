@@ -25,7 +25,7 @@ class HimalayasDiscoverySource(BaseDiscoverySource):
         super().__init__(name=name, enabled=enabled)
         self.employers = employers
         self.employers_by_name = employers_by_name or {}
-        self.http_client = http_client or HttpClient()
+        self.http_client = http_client or HttpClient(public_only=True)
 
     def _listings(self):
         queries = ({"employment_type": "Intern"}, {"seniority": "Entry-level"})

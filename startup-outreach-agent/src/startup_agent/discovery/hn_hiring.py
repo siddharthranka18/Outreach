@@ -2,6 +2,7 @@
 import json
 import re
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
@@ -30,7 +31,7 @@ def parse_comment(comment, employers):
     header = page.get_text("\n", strip=True).splitlines()[0]
     role = next((part.strip() for part in header.split("|") if _is_target_role(part)), None)
     title = role or " | ".join(body.split("|")[:5])[:220]
-    if not location or not _is_target_role(title) or not EARLY.search(body):
+    if not location or not _is_target_role(title) or not (EARLY.search(body) or EMAIL.search(body)):
         return None
     urls = [str(a["href"]) for a in page.select("a[href]") if urlsplit(str(a["href"])).scheme == "https"]
     evidence = employers.get(normalize_name(name))
@@ -58,6 +59,22 @@ def parse_comment(comment, employers):
     return company, job, leads
 
 
+def current_hn_contact(hint, domain, now=None):
+    """The user opted into current top-level monthly hiring posts as evidence."""
+    now=now or datetime.now(timezone.utc)
+    try:
+        fetched=datetime.fromisoformat(hint.get("checked_at", ""))
+        posted=datetime.fromisoformat(hint.get("posted_at", ""))
+        return bool(hint.get("evidence_type") == "hn_monthly_hiring" and hint.get("top_level") is True
+            and hint.get("thread_author") == "whoishiring" and str(hint.get("thread_id","")).isdigit()
+            and hint.get("author") and hint.get("domain") == domain
+            and EMAIL.fullmatch(hint.get("email", "")) and hint["email"].rsplit('@',1)[1] == domain
+            and re.fullmatch(r"https://news\.ycombinator\.com/item\?id=\d+", hint.get("evidence_url",""))
+            and timedelta(0) <= now-fetched <= timedelta(days=2)
+            and timedelta(0) <= now-posted <= timedelta(days=45))
+    except (ValueError,TypeError): return False
+
+
 class HnHiringDiscoverySource(BaseDiscoverySource):
     def __init__(self, employers=None, name="hn_hiring", enabled=True, http_client=None, leads_path=None):
         super().__init__(name=name, enabled=enabled)
@@ -83,6 +100,10 @@ class HnHiringDiscoverySource(BaseDiscoverySource):
             result = parse_comment(comment, self.employers)
             if not result: continue
             company, job, emails = result
+            for email in emails:
+                email.update(evidence_type="hn_monthly_hiring",top_level=True,thread_author="whoishiring",
+                    thread_id=identifier, author=comment.get("author"), posted_at=comment.get("created_at"),
+                    checked_at=datetime.now(timezone.utc).isoformat())
             companies[company.website] = company
             jobs[job.job_url] = job
             leads.extend(emails)

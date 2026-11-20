@@ -7,6 +7,7 @@ import argparse
 import json
 import logging
 import re
+import httpx
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -21,6 +22,7 @@ from startup_agent.utils.http_client import HttpClient
 from startup_agent.utils.normalizers import normalize_job_url
 
 logger = logging.getLogger(__name__)
+EARLY_TECH = re.compile(r"\b(?:intern(?:ship)?|junior|fresher|entry[- ]level|new[- ]grad(?:uate)?|trainee|apprentice)\b",re.I)
 
 
 def india_location(text):
@@ -65,13 +67,18 @@ def parse_consider(payload, name, board_url):
             employee_count=band, funding_stage=stage, source_name=name, source_url=source,
             careers_url=source)
         for row in group.get("jobs", []):
+            # Harvest all observed boards even when this particular role is senior.
+            from startup_agent.discovery.direct_ats import extract_ats_target
+            for observed in (row.get('applyUrl'),row.get('url')):
+                if observed and extract_ats_target(observed,company_name,'https://'+domain):
+                    companies[domain].ats_urls.append(observed)
             title = row.get("title") or ""
             places = [str(s) for s in row.get("locations", [])]
             places.extend(str(p.get("value") or p.get("label") or "")
                           for p in row.get("normalizedLocations", []) if isinstance(p, dict))
             location = india_location(" / ".join(places))
             url = row.get("applyUrl") or row.get("url") or ""
-            if not location or not _is_target_role(title) or not EARLY_CAREER.search(title):
+            if not location or not _is_target_role(title) or not EARLY_TECH.search(title):
                 continue
             if urlsplit(url).scheme != "https":
                 continue
@@ -89,6 +96,7 @@ class PortfolioDiscoverySource(BaseDiscoverySource):
         self.options = options or {}
         self.http_client = http_client or HttpClient(public_only=True, timeout=20, max_retries=1)
         self.fetched_count = 0
+        self.partial_error = ''
 
     def discover(self):
         if not self.is_enabled():
@@ -101,23 +109,33 @@ class PortfolioDiscoverySource(BaseDiscoverySource):
             raise ValueError("Consider page no longer exposes initial search state.")
         initial = json.JSONDecoder().raw_decode(page[marker.end():])[0]
         headers = {"X-CSRF-Token": initial["csrfToken"], "Accept": "application/json"}
-        meta = {"size": 25}
         companies, jobs = {}, {}
         # Sequence is returned by the public UI; no guessed offset or private API.
-        for _ in range(min(int(self.options.get("max_pages", 3)), 5)):
-            payload = self.http_client.post(self.url + "/api-boards/search-jobs", headers=headers,
-                json_data={"meta": meta, "board": initial["board"],
-                           "query": {"locations": ["India"]}, "grouped": True}).json()
-            if payload.get("errors"):
-                raise ValueError("Consider search rejected the public query.")
-            self.fetched_count += sum(len(g.get("jobs", [])) for g in payload.get("jobs", []))
-            result = parse_consider(payload, self.name, self.url)
-            companies.update({c.website: c for c in result.companies})
-            jobs.update({normalize_job_url(j.job_url): j for j in result.jobs})
-            next_meta = payload.get("meta") or {}
-            if not payload.get("jobs") or not next_meta.get("sequence") or next_meta == meta:
-                break
-            meta = {**next_meta, "size": 25}
+        # A broad Remote search is only discovery; local India/worldwide checks still apply.
+        queries=self.options.get('location_queries',[['India']])
+        page_size=max(1,min(25,int(self.options.get('page_size',10))))
+        for locations in queries[:2]:
+            meta={"size":page_size}
+            for _ in range(max(1,min(int(self.options.get("max_pages", 5)), 8))):
+                try:
+                    payload = self.http_client.post(self.url + "/api-boards/search-jobs", headers=headers,
+                        json_data={"meta": meta, "board": initial["board"],
+                                   "query": {"locations": locations}, "grouped": True}).json()
+                except (httpx.HTTPError,OSError,ValueError) as exc:
+                    if not companies:raise
+                    self.partial_error=type(exc).__name__
+                    logger.warning('%s kept %d company groups after a partial search failure.',self.name,len(companies))
+                    return DiscoveryResult(companies=list(companies.values()),jobs=list(jobs.values()))
+                if payload.get("errors"):
+                    raise ValueError("Consider search rejected the public query.")
+                self.fetched_count += sum(len(g.get("jobs", [])) for g in payload.get("jobs", []))
+                result = parse_consider(payload, self.name, self.url)
+                companies.update({c.website: c for c in result.companies})
+                jobs.update({normalize_job_url(j.job_url): j for j in result.jobs})
+                next_meta = payload.get("meta") or {}
+                if not payload.get("jobs") or not next_meta.get("sequence") or next_meta == meta:
+                    break
+                meta = {**next_meta, "size": page_size}
         return DiscoveryResult(companies=list(companies.values()), jobs=list(jobs.values()))
 
 
