@@ -345,10 +345,9 @@ def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
         if draft.get("recipient") != recipient:
             if not drafts_remaining:
                 continue
-            role = lead["role"].replace("_", " ")
             route = OutreachRoute(
-                company=name, action="Internship enquiry", title=f"{role.title()} engineering internship enquiry",
-                category=role, contact=recipient, url=lead["source"],
+                company=name, action="Internship enquiry", title="Software engineering internship enquiry",
+                category="software", contact=recipient, url=lead["source"],
             )
             try:
                 generated = generate_email_draft(route, profile, enquiry_context=lead["context"])

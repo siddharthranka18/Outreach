@@ -100,13 +100,35 @@ def generate_email_draft(
     }
     enquiry_instruction = ""
     if enquiry_context is not None:
+        # An unadvertised enquiry represents the whole profile, not the role
+        # inferred while researching this startup.
+        facts["role"] = "Software / CSE-related internship enquiry"
+        facts.pop("matched_resume_skills")
+        facts.pop("approved_evidence")
+        facts["education"] = {
+            "degree": profile.current_education.degree,
+            "current_year": profile.current_education.current_year,
+        }
+        facts["verified_skills"] = {
+            "languages": profile.skills.languages,
+            "frameworks": profile.skills.frameworks,
+            "databases": profile.skills.databases,
+            "ai_ml": profile.skills.ai_ml,
+            "tools": profile.skills.tools,
+        }
         facts["published_company_context"] = enquiry_context
         enquiry_instruction = (
-            " Ask whether the engineering team accepts internship enquiries. "
+            " This is a broad software / CSE internship enquiry, not an application for a specific role. "
+            "Ask about suitable software internships across backend, full-stack and AI-related work. "
+            "Briefly introduce the student's education and summarise hands-on skills across all three areas "
+            "using only verified_skills (for example backend APIs, web development and LLM/RAG tools when supported). "
+            "Do not restrict the request or subject to full-stack or any single specialism, "
+            "claim expertise in every field, or name individual projects. "
             "There is no confirmed matching internship opening. If the context mentions an open junior full-time role, "
             "ask about an internship or part-time contribution instead; do not imply full-time eligibility. Use a specific company detail only "
             "when supported by published_company_context. The candidate is based in India: ask about remote-from-India work "
-            "when the company location is uncertain, rather than assuming overseas work authorization. The sender will attach their resume."
+            "when the company location is uncertain, rather than assuming overseas work authorization. "
+            "Do not mention attachments or add links: the application adds the resume note and profile links afterwards."
         )
     try:
         response = httpx.post(
@@ -177,9 +199,21 @@ def generate_email_draft(
 
     company = " ".join(route.company.split())
     name = " ".join(profile.name.split())
+    footer = ""
+    if enquiry_context is not None:
+        subject = "Software internship enquiry"
+        body += "\n\nI've attached my resume for your consideration."
+        footer = "".join(
+            f"\n{label}: {profile.public_links[key]}"
+            for key, label in (("github", "GitHub"), ("linkedin", "LinkedIn"))
+            if profile.public_links.get(key)
+        )
+    rendered_body = f"Hi {company} hiring team,\n\n{body}\n\nThanks,\n{name}{footer}"
+    if len(rendered_body) > 3000:
+        raise RuntimeError("Email draft exceeds the review card's body limit.")
     return EmailDraft(
         recipient=route.contact,
         subject=subject,
-        body=f"Hi {company} hiring team,\n\n{body}\n\nThanks,\n{name}",
+        body=rendered_body,
         listing_url=route.url or "",
     )

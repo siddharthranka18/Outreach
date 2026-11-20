@@ -92,6 +92,7 @@ class CandidateProfile:
     experiences: List[CandidateExperience] = field(default_factory=list)
     projects: List[CandidateProject] = field(default_factory=list)
     preferences: CandidatePreferences = field(default_factory=CandidatePreferences)
+    public_links: Dict[str, str] = field(default_factory=dict)
 
     @property
     def all_skills(self) -> Set[str]:
@@ -167,6 +168,7 @@ class CandidateProfile:
             experiences=experiences,
             projects=projects,
             preferences=preferences,
+            public_links=cand.get("public_links", {}),
         )
 
     @classmethod

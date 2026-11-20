@@ -3,6 +3,9 @@
 
 candidate:
   name: "Siddharth Ranka"
+  public_links:
+    github: "https://github.com/siddharthranka18"
+    linkedin: "https://www.linkedin.com/in/siddharth-ranka/"
   current_education:
     degree: "B.Tech in Computer Science and Engineering"
     institution: "BML Munjal University"

@@ -1,5 +1,7 @@
 # Daily digest improvements from the November 20 roadmap
 
+New cold-enquiry drafts now ask broadly about software/CSE internships across backend, full-stack and AI work. Gemini receives the verified skills and education instead of a single inferred role or project. The application adds a general subject, resume attachment note, and the configured GitHub/LinkedIn links below the signature. Direct applications remain role-specific. Existing saved Telegram edits are reused; the new wording applies to newly generated enquiries. Resume attachment and individual Approve & Send remain in the existing Apps Script flow; no Code.gs update is needed.
+
 This implements the missing parts of `further_instructions_to_improve.md`. It preserves the June 2028 student profile, strict fresher classification, two-year experience ceiling, 200-employee application gate, unknown-size exclusion, existing action history and individual email approval. The new document explicitly authorizes the inbox/HN policy changes below; they are not accidental relaxations.
 
 ## Implemented

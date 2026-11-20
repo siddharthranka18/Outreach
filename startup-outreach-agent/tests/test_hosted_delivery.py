@@ -35,7 +35,7 @@ def test_hosted_enquiry_generates_once_then_reuses_edit(monkeypatch):
     with patch("startup_agent.hosted_delivery.generate_email_draft", return_value=generated) as draft:
         cards = cold_enquiry_cards([LEAD], profile, set(), [])
         assert cards[0]["draft"]["source_url"] == LEAD["source"]
-        assert draft.call_args.args[0].category == "backend"
+        assert draft.call_args.args[0].category == "software"
         assert draft.call_args.kwargs["enquiry_context"] == LEAD["context"]
         saved = {**cards[0]["draft"], "body": "Edited on Telegram"}
         history = [{"url": URL, "status": "open", "delivery": "pending", "draft": saved}]
