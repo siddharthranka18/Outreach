@@ -4,6 +4,9 @@ import csv
 from datetime import date, datetime, timedelta
 from io import StringIO
 from urllib.parse import urlsplit
+import logging
+from bs4 import BeautifulSoup
+from startup_agent.utils.normalizers import normalize_name
 
 from startup_agent.utils.http_client import HttpClient
 
@@ -12,6 +15,35 @@ CSV_URL = "https://bharat.digital/startups/funding.csv"
 LICENSE_URL = "https://bharat.digital/license/"
 STAGES = {"pre-seed", "seed", "angel", "series a"}
 CATEGORIES = {"ai", "deep tech", "saas", "security", "climate tech", "fintech & payments", "govtech"}
+
+
+def funded_employers(reviewed: dict, client=None, today=None) -> list[dict]:
+    """Resolve recent CSV company names using existing employer evidence only."""
+    client = client or HttpClient(timeout=10, max_retries=1, public_only=True)
+    cutoff = (today or date.today()) - timedelta(days=30)
+    known = {normalize_name(row.get("company_name", row.get("funding_tracker_name", ""))): (domain, row)
+             for domain, row in reviewed.items()}
+    result = []
+    try:
+        reader = csv.DictReader(StringIO(client.get(CSV_URL).text.lstrip("\ufeff")))
+        for row in reader:
+            try:
+                reported = date.fromisoformat(row.get("first_reported", ""))
+            except ValueError:
+                continue
+            if not cutoff <= reported <= (today or date.today()):
+                continue
+            if row.get("stage", "").lower() not in STAGES or row.get("category", "").lower() not in CATEGORIES:
+                continue
+            match = known.get(normalize_name(row.get("startup", "")))
+            if match and match[1].get("careers_url"):
+                domain, evidence = match
+                result.append({"website": f"https://{domain}", **evidence})
+            if len(result) >= 10:
+                break
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Funding research unavailable (%s).", type(exc).__name__)
+    return result
 
 
 def print_funding_leads(reviewed_companies: dict, *, portfolio_companies: list[dict] | None = None,

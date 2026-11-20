@@ -270,6 +270,30 @@ function jobKey(url) {
   return hexDigest(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, url)).slice(0, 24);
 }
 
+function hostedJobIdentity(url) {
+  const match = /^https?:\/\/([^/?#]+)([^?#]*)(\?[^#]*)?(#.*)?$/i.exec(url || '');
+  if (!match) return url;
+  const [, authority, rawPath, query = '', fragment = ''] = match;
+  const host = authority.toLowerCase().replace(/^www\./, '');
+  const path = rawPath.replace(/\/+$/, '');
+  if (/^#outreach-enquiry(?:-form)?$/.test(fragment)) return url;
+  if (['boards.greenhouse.io', 'job-boards.greenhouse.io'].includes(host)) {
+    const id = /^\/[^/]+\/jobs\/(\d+)(?:\/apply)?$/.exec(path)?.[1];
+    if (id) return `greenhouse:${id}`;
+  }
+  if (['jobs.lever.co', 'jobs.eu.lever.co', 'jobs.ashbyhq.com'].includes(host)) {
+    const posting = /^\/([^/]+)\/([a-f0-9-]{36})(?:\/apply|\/application)?$/i.exec(path);
+    if (posting) return `${host}:${posting[1].toLowerCase()}:${posting[2].toLowerCase()}`;
+  }
+  if (host === 'wellfound.com') {
+    const id = /^\/jobs\/(\d+)(?:-[^/]+)?$/.exec(path)?.[1];
+    if (id) return `wellfound:${id}`;
+  }
+  const params = query.slice(1).split('&').filter(param => param &&
+    !/^(?:utm_[^=]+|ref|source|fbclid|gclid|gh_src|lever-source)=/i.test(param)).sort();
+  return `${host}${path}${params.length ? '?' + params.join('&') : ''}${fragment}`;
+}
+
 function handleHostedJobAction(config, callback) {
   const chat = callback.message?.chat;
   if (chat?.type !== 'private' || String(chat.id) !== config.chatId ||
@@ -277,8 +301,13 @@ function handleHostedJobAction(config, callback) {
   const action = /^hosted-job:(skip|applied):([a-f0-9]{24})$/.exec(callback.data);
   if (!action) return 'Invalid job action.';
   const {sheet, rows} = hostedHistory();
-  const matches = rows.flatMap((row, index) => row[1] && jobKey(row[1]) === action[2] ? [index] : []);
-  if (!matches.length || matches.some(index => ['skipped', 'applied'].includes(rows[index][2]))) {
+  const original = rows.find(row => row[1] && jobKey(row[1]) === action[2]);
+  if (!original) {
+    return 'Job already handled or unavailable.';
+  }
+  const identity = hostedJobIdentity(original[1]);
+  const matches = rows.flatMap((row, index) => hostedJobIdentity(row[1]) === identity ? [index] : []);
+  if (matches.some(index => ['skipped', 'applied'].includes(rows[index][2]))) {
     return 'Job already handled or unavailable.';
   }
   const status = action[1] === 'skip' ? 'skipped' : 'applied';
@@ -303,6 +332,9 @@ function verifiedShortlist(event) {
   }
   if (mismatch) throw new Error('Invalid hosted request signature.');
   const batch = JSON.parse(payload);
+  if (batch.summary !== undefined && (typeof batch.summary !== 'string' || batch.summary.length > 3500)) {
+    throw new Error('Invalid digest summary.');
+  }
   if (!Number.isSafeInteger(batch.timestamp) || Math.abs(Date.now() / 1000 - batch.timestamp) > 600) {
     throw new Error('Invalid hosted request timestamp.');
   }
@@ -437,17 +469,19 @@ function publishHostedCards(batch) {
         row[2] = nextStatus;
       }
     }
-    if (!byUrl.has(row[1])) byUrl.set(row[1], []);
-    byUrl.get(row[1]).push({values: row, number: index + 2});
+    const identity = hostedJobIdentity(row[1]);
+    if (!byUrl.has(identity)) byUrl.set(identity, []);
+    byUrl.get(identity).push({values: row, number: index + 2});
   });
   SpreadsheetApp.flush();
   let sent = 0;
   let resume;
   const seen = new Set();
   for (const card of batch.cards) {
-    if (seen.has(card.job_url)) continue;
-    seen.add(card.job_url);
-    const matches = byUrl.get(card.job_url) || [];
+    const identity = hostedJobIdentity(card.job_url);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    const matches = byUrl.get(identity) || [];
     if (matches.some(row => ['skipped', 'applied'].includes(row.values[2]) ||
         String(row.values[5]) === batch.run_id)) continue;
     if (card.draft && (
@@ -478,7 +512,7 @@ function publishHostedCards(batch) {
       sent++;
       continue;
     }
-    const key = jobKey(card.job_url);
+    const key = jobKey(matches[0]?.values[1] || card.job_url);
     telegram(config, 'sendMessage', {
       chat_id: config.chatId,
       text: card.text,
@@ -491,6 +525,17 @@ function publishHostedCards(batch) {
     sheet.getRange(rowNumber, 6).setValue(batch.run_id);
     SpreadsheetApp.flush();
     sent++;
+  }
+  if (!sent && batch.summary) {
+    const properties = PropertiesService.getScriptProperties();
+    if (properties.getProperty('OUTREACH_LAST_HEARTBEAT') !== batch.run_id) {
+      telegram(config, 'sendMessage', {
+        chat_id: config.chatId,
+        text: 'Digest completed — no eligible unhandled cards to send.\n' + batch.summary +
+          '\nSaved Skip/Applied and email delivery actions are also checked before sending.',
+      });
+      properties.setProperty('OUTREACH_LAST_HEARTBEAT', batch.run_id);
+    }
   }
   return sent;
 }

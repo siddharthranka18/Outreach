@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 import logging
 import time
+import json
+from collections import Counter
 import yaml
 from typing import Dict, List, Optional, Tuple, Type
 from sqlalchemy.orm import Session
@@ -227,6 +229,11 @@ class DiscoveryPipeline:
                 self._persist_entities(session, collected_companies, collected_jobs, summary)
 
         summary.duration_seconds = round(time.time() - start_time, 2)
+        self.settings.data_dir.joinpath("processed").mkdir(parents=True, exist_ok=True)
+        counts = Counter(job.source_name for job in collected_jobs)
+        self.settings.data_dir.joinpath("processed/source_counts.json").write_text(
+            json.dumps(dict(counts)), encoding="utf-8",
+        )
         logger.info(
             "Discovery pipeline completed in %.2fs: %d companies (+%d, ~%d), %d jobs (+%d, ~%d).",
             summary.duration_seconds,

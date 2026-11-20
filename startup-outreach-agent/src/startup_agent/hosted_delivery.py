@@ -23,6 +23,8 @@ from startup_agent.database.repositories import CompanyRepository, JobRepository
 from startup_agent.digest import format_digest
 from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
 from startup_agent.discovery.gallery_leads import gallery_leads
+from startup_agent.discovery.funding_leads import funded_employers
+from startup_agent.funnel import source_funnel, format_funnel
 from startup_agent.email_drafts import generate_email_draft
 from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.startup_filter import StartupEligibilityFilter, StartupEligibilityStatus
@@ -127,6 +129,9 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
     contacts = yaml.safe_load(contacts_path.read_text(encoding="utf-8")) if contacts_path.is_file() else {}
     client = HttpClient(timeout=7, max_retries=0, rate_limit_delay=0.25)
     leads = {}
+    if os.getenv("OUTREACH_FUNDING_LEADS", "true").lower() == "true":
+        for lead in funded_employers(reviewed):
+            leads[employer_domain(lead["website"])] = lead
     for company in session.scalars(select(CompanyModel).order_by(CompanyModel.id)):
         domain = employer_domain(company.website)
         if domain and company.careers_url:
@@ -244,8 +249,11 @@ def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
     return cards
 
 
-def hosted_request(endpoint: str, secret: str, run_id: str, cards: list[dict]) -> dict:
-    payload = json.dumps({"timestamp": int(time.time()), "run_id": run_id, "cards": cards}, ensure_ascii=True)
+def hosted_request(endpoint: str, secret: str, run_id: str, cards: list[dict], *, summary=None) -> dict:
+    batch = {"timestamp": int(time.time()), "run_id": run_id, "cards": cards}
+    if summary is not None:
+        batch["summary"] = summary[:3500]
+    payload = json.dumps(batch, ensure_ascii=True)
     signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
     try:
         response = httpx.post(
@@ -286,7 +294,10 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
     cards = (enquiries if enquiries_only else [*cards[:20], *enquiries, *cards[20:]])[:100]
     logger.info("Prepared %d email enquiry card(s) for hosted review.", len(enquiries))
     logger.info("Prepared %d ranked application routes and %d total hosted cards.", len(routes), len(cards))
-    result = hosted_request(endpoint, secret, run_id, cards)
+    funnel = source_funnel(session, settings)
+    summary = format_funnel(funnel)
+    logger.info("%s", summary)
+    result = hosted_request(endpoint, secret, run_id, cards, summary=summary)
     if type(result.get("sent")) is not int:
         raise RuntimeError("Apps Script did not confirm the Telegram delivery count.")
     logger.info("Hosted review accepted %d cards and delivered %d after saved-action checks.", len(cards), result["sent"])

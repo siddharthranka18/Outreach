@@ -22,6 +22,7 @@ from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.ranker import OpportunityRanker
 from startup_agent.matching.scorer import MatchResult
 from startup_agent.routing import build_outreach_routes
+from startup_agent.funnel import source_funnel, format_funnel
 from startup_agent.telegram import (
     poll_job_actions, private_chat_ids, send_employer_email_card,
     send_gmail_test_card, send_job_cards, send_test_digest,
@@ -314,6 +315,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
             with session_factory() as session:
                 routes = build_outreach_routes(session, settings)
+                funnel = source_funnel(session, settings) if args.digest_preview else None
             if args.email_preview or args.email_llm_preview or args.email_save:
                 openings = [route for route in routes if route.job_id is not None and route.action != "Confirm location"]
                 if not openings:
@@ -355,6 +357,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"Telegram confirmed {count} test message(s).")
                 return 0
             if args.digest_preview:
+                print(format_funnel(funnel))
                 print(format_digest(routes))
                 return 0
             for route in routes:
