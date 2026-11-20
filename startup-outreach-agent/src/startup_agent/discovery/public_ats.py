@@ -61,6 +61,8 @@ def fetch_public_ats(target, client):
     elif platform in {"teamtailor", "personio"}:
         url = f"https://{board}.teamtailor.com/jobs.rss?per_page=100" if platform == "teamtailor" else f"https://{board}.jobs.personio.de/xml"
         doc = BeautifulSoup(client.get(url).text, "xml")
+        if not doc.find("rss" if platform == "teamtailor" else "workzag-jobs"):
+            raise ValueError("ATS XML feed changed shape or redirected to a non-feed page")
         for item in doc.find_all("item" if platform == "teamtailor" else "position")[:200]:
             def value(key):
                 node = item.find(key)

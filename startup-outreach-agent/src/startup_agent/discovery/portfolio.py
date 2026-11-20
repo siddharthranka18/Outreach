@@ -38,8 +38,13 @@ def india_location(text):
 def size_band(raw):
     """Retain the full published range; never truncate a band at the cap."""
     value = str(raw or "").replace(",", "").replace("\u2013", "-")
-    match = re.search(r"\b(\d+\s*-\s*\d+|\d+\+|\d+)\s*(?:employees)?", value)
-    return match.group(1).replace(" ", "") if match else None
+    match = re.fullmatch(r"\s*(\d+\s*-\s*\d+|\d+\+|\d+)\s*(?:employees)?\s*", value)
+    if not match:
+        return None
+    band = match.group(1).replace(" ", "")
+    if "-" in band and int(band.split("-")[0]) > int(band.split("-")[1]):
+        return None
+    return band
 
 
 def parse_consider(payload, name, board_url):
@@ -61,7 +66,10 @@ def parse_consider(payload, name, board_url):
             careers_url=source)
         for row in group.get("jobs", []):
             title = row.get("title") or ""
-            location = india_location(" / ".join(str(s) for s in row.get("locations", [])))
+            places = [str(s) for s in row.get("locations", [])]
+            places.extend(str(p.get("value") or p.get("label") or "")
+                          for p in row.get("normalizedLocations", []) if isinstance(p, dict))
+            location = india_location(" / ".join(places))
             url = row.get("applyUrl") or row.get("url") or ""
             if not location or not _is_target_role(title) or not EARLY_CAREER.search(title):
                 continue
@@ -124,7 +132,7 @@ def export_suggestions(companies, path):
                 "review_required": True,
             }
     path = Path(path)
-    if path.name == "company_sizes.yaml":
+    if path.name.casefold() == "company_sizes.yaml":
         raise ValueError("Write suggestions separately from reviewed evidence.")
     path.write_text(yaml.safe_dump(output, sort_keys=True), encoding="utf-8")
 

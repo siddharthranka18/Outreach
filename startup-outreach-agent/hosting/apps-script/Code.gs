@@ -528,13 +528,15 @@ function publishHostedCards(batch) {
   }
   if (!sent && batch.summary) {
     const properties = PropertiesService.getScriptProperties();
-    if (properties.getProperty('OUTREACH_LAST_HEARTBEAT') !== batch.run_id) {
+    const recent = JSON.parse(properties.getProperty('OUTREACH_RECENT_HEARTBEATS') || '[]');
+    const alreadyDelivered = rows.some(row => String(row[5]) === batch.run_id);
+    if (!alreadyDelivered && !recent.includes(batch.run_id)) {
       telegram(config, 'sendMessage', {
         chat_id: config.chatId,
-        text: 'Digest completed — no eligible unhandled cards to send.\n' + batch.summary +
+        text: 'Digest run finished — 0 cards delivered.\n' + batch.summary +
           '\nSaved Skip/Applied and email delivery actions are also checked before sending.',
       });
-      properties.setProperty('OUTREACH_LAST_HEARTBEAT', batch.run_id);
+      properties.setProperty('OUTREACH_RECENT_HEARTBEATS', JSON.stringify([...recent, batch.run_id].slice(-32)));
     }
   }
   return sent;

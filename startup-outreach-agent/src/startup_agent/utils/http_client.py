@@ -52,6 +52,7 @@ class HttpClient:
         url: str,
         params: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
+        allowed_domain: Optional[str] = None,
     ) -> httpx.Response:
         """Execute a GET request with retries and rate limiting.
 
@@ -83,8 +84,13 @@ class HttpClient:
                 ) as client:
                     current = str(httpx.URL(url, params=params)) if params else url
                     for redirect in range(5):
+                        if allowed_domain:
+                            host = (urlsplit(current).hostname or "").removeprefix("www.")
+                            if host != allowed_domain and not host.endswith("." + allowed_domain):
+                                raise ValueError("Cross-employer redirect refused.")
                         if self.public_only:
                             validate_public_url(current)
+                        self._apply_rate_limit()
                         resp = client.get(current, follow_redirects=not self.public_only)
                         if not self.public_only or not resp.is_redirect:
                             break

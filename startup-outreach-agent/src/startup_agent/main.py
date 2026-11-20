@@ -289,9 +289,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("\n>>> Launching multi-source discovery pipeline...")
             summary = run_discovery_pipeline(settings=settings)
             print_discovery_report(summary)
+            session_factory = create_session_factory(create_db_engine(settings.database_url))
+            with session_factory() as session:
+                print(format_funnel(source_funnel(session, settings)))
 
             if summary.all_failed:
                 print("ERROR: All attempted discovery sources failed.", file=sys.stderr)
+                if args.hosted_daily:
+                    with session_factory() as session:
+                        publish_hosted_shortlist(session, settings, discovery_failed=True)
                 return 1
             if args.telegram_daily or args.hosted_daily:
                 session_factory = create_session_factory(create_db_engine(settings.database_url))

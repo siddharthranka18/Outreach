@@ -13,6 +13,7 @@ def test_monthly_top_level_only_and_emails_stay_unverified(tmp_path):
     assert source.fetched_count == 3
     assert len(result.jobs) == 1
     assert result.companies[0].employee_count == "11-50"
+    assert "jobs@studio.example" not in result.jobs[0].description
     leads = json.loads(path.read_text())
     assert leads == [{"domain":"studio.example", "email":"jobs@studio.example", "evidence_url":"https://news.ycombinator.com/item?id=124", "verified":False}]
     unknown = parse_comment(fixture["thread"]["children"][0], {})

@@ -1,6 +1,6 @@
 # Outreach platform architecture and workflow
 
-Verified snapshot dated 19 November 2026. This reference describes the checked-in Python implementation, the local Apps Script implementation, and the Oracle VM units inspected on this date. Runtime secrets are omitted.
+Code snapshot updated 20 November 2026. The Oracle VM units were inspected on 19 November; the additions described here require VM synchronization and a new Apps Script deployment. Runtime secrets are omitted.
 
 ## 1. Purpose and current deployment
 
@@ -53,7 +53,7 @@ The Python discovery process runs on the VM. Telegram interaction handling runs 
 
 ### 3.1 Sources enabled in sources.yaml
 
-There are ten configured entries, with nine enabled. Source-level success means the adapter completed. It can return zero eligible records.
+The original nine enabled discovery adapters remain, alongside three Consider portfolios, HN and three remote feeds. Four additional ATS platform flags are enabled within the existing ATS path. Source-level success means the adapter completed; it can return zero eligible records. Platform and enquiry-option entries control existing paths rather than starting parallel discovery runs.
 
 | Source | Fetching method | Scope and important limits |
 | --- | --- | --- |
@@ -65,13 +65,20 @@ There are ten configured entries, with nine enabled. Source-level success means 
 | Y Combinator | Public directory search data and employer hiring pages | Discovers hiring companies through the site's search integration, with company-size filtering and region cohorts. Fetches company job pages. Public-page rate limits can cause retries or partial results. Default query limit is 75 companies per region query before deduplication. |
 | TopStartups.io | Public jobs-page HTML at https://topstartups.io/jobs/ | Extracts companies and jobs. Coverage depends on the page content the adapter receives. |
 | Wellfound India | Public HTML, beginning at https://wellfound.com/location/india | Up to five pages per run. Source adapter filters published employee bands and early-career metadata. Access failures and page changes can reduce coverage. |
-| Direct Career Pages & ATS | Public per-employer JSON APIs | Boards in company_sizes.yaml plus boards derived from other discovered job links. Supports Greenhouse, Lever, Ashby and Recruitee. |
+| Direct Career Pages & ATS | Public per-employer JSON APIs and RSS | Boards in company_sizes.yaml plus boards derived from discovered job links. Greenhouse, Lever, Ashby, Recruitee, Workable, Breezy, Teamtailor and BambooHR. Each new platform has its own flag. Company size must already pass before expansion. |
+| Peak XV / Lightspeed / Bessemer | Consider public board HTML plus CSRF/session-protected public search | Enabled. Reads board identity and temporary token from the page; posts the actual UI search to /api-boards/search-jobs. India query, at most three pages of 25 company groups per board. Locally requires explicit India/worldwide location and technical early-career titles. Keeps full published size bands, employer domain and stage where provided. Missing job descriptions can still block routing unless ATS enrichment supplies them. |
+| HN Who is hiring | Keyless Algolia search_by_date and items API | Enabled. Latest monthly thread by whoishiring, up to 500 top-level comments. Technical early-career text plus explicit India/worldwide permission. Unknown sizes remain excluded. Emails are saved as unverified research leads and redacted from job text so existing routing cannot treat them as approved contacts. |
+| Remote OK | https://remoteok.com/api | Enabled. One feed request. Technical intern/junior/entry-level/new-grad title and explicit India/Worldwide/Anywhere required. Known employer domain/size evidence is required; original source posting and credit retained. |
+| Jobicy | https://jobicy.com/api/v2/remote-jobs | Enabled. One bounded feed response with the same strict title/geography/evidence requirements. Original Jobicy URL retained for application and attribution. |
+| Working Nomads | https://www.workingnomads.com/api/exposed_jobs/ | Enabled. Same strict feed filters and source link retention. Remote without explicit country permission is insufficient. |
 
 The Reviewed Startup Careers description in sources.yaml still mentions LivingAI and Curvvtech. Its implementation also includes MAGDOX.
 
 ### 3.2 Implemented source currently disabled
 
 Remotive has an adapter and configuration entry, with enabled set to false. It was trialled and returned zero qualifying listings among reviewed employers.
+
+Accel, General Catalyst and Blume Getro boards are configured but disabled: their public pages returned HTTP 403 and no keyless search protocol was verified. The adapter explicitly refuses unverified Getro access; it does not guess endpoints or use the network-owner bearer API. Nexus is configured as Consider but disabled following a connection failure; its public search must be verified before enabling. Personio XML support is implemented and tested, but its platform flag remains off until each intended employer's feed is verified. No separate HN-only contact evidence exception is enabled.
 
 Its adapter fetches https://remotive.com/api/remote-jobs once per discovery call. It accepts technical internship/fresher titles with explicit Worldwide/Anywhere or India location text, requires a reviewed employer name, retains the Remotive application URL, and adds source attribution. Broad APAC or unspecified Remote text is excluded by that adapter.
 
@@ -80,10 +87,10 @@ Its adapter fetches https://remotive.com/api/remote-jobs once per discovery call
 | Source | Current use |
 | --- | --- |
 | Startups Gallery | Called during hosted enquiry research. Reads the India directory and up to ten linked company profiles. Extracts the displayed employee band, employer website, careers link and supported ATS URLs. |
-| bharat.digital funding CSV | A separate --funding-leads command reads the openly licensed funding CSV, filters the last 30 days, selected technical categories, and pre-seed/seed/angel/Series A. Prints leads and references for review. The Oracle timer currently runs --hosted-daily only, so it does not execute this standalone funding command. |
+| bharat.digital funding CSV | --hosted-daily now calls bounded funding research by default, unless OUTREACH_FUNDING_LEADS=false. Last 30 days, technical categories, pre-seed/seed/angel/Series A, at most ten employer matches. The CSV has names/funding/news references rather than verified employer domains and sizes: names are resolved only against existing reviewed evidence. Unresolved companies still require research; no domains or sizes are guessed. The standalone --funding-leads review command remains available. |
 | Reviewed accelerator/portfolio references | Company-size configuration includes references such as Antler and Blume. These are curated evidence entries, rather than general-purpose portfolio crawlers. |
 | Entrackr | Manual funding research source. Discovered employers require website, size and careers verification before configuration. |
-| Remote Rocketship and Working Nomads | Manual research sources. Their job feeds are absent from the enabled adapters. |
+| Remote Rocketship | Manual research source. Working Nomads now has an enabled public-feed adapter. |
 | Google site searches | Manual ATS-board discovery. Verified boards can be added to company_sizes.yaml for recurring API checks. |
 
 QuickHyre, Internshala, SimplifyJobs, Adzuna, Jooble, The Muse, USAJOBS, Apify, RapidAPI, Reddit and Scrapling are absent from the active source adapters. Prior discussion and research did not activate these integrations.
@@ -117,6 +124,8 @@ The following is generated from company_sizes.yaml. These entries support compan
 
 Each YAML entry includes its evidence source URL and, where available, the date it was checked. Hevo Data's 201–500 band exceeds the configured size cap and therefore fails the small-company gate.
 
+Portfolio evidence is stored in the normal company table and can be reused for feed identity/size lookup on later runs and cold research immediately. It does not overwrite the reviewed YAML. To export separate suggestions for manual review: `PYTHONPATH=src .venv/bin/python -m startup_agent.discovery.portfolio --export data/processed/company_sizes.suggested.yaml`. The exporter refuses a destination named company_sizes.yaml. Review provenance, dates, size and the actual employer careers URL before copying any entry.
+
 ## 4. Discovery, normalization and storage
 
 The discovery pipeline resolves enabled adapters, isolates source exceptions, collects company/job objects, hydrates known company sizes and expands supported public ATS boards exposed by discovered links.
@@ -129,6 +138,11 @@ Supported public endpoints include:
 - Lever: https://api.lever.co/v0/postings/{board}?mode=json
 - Ashby: https://api.ashbyhq.com/posting-api/job-board/{board}
 - Recruitee: https://{board}.recruitee.com/api/offers
+- Workable: https://apply.workable.com/api/v1/widget/accounts/{board}?details=true (duplicate location rows merged).
+- Breezy: https://{board}.breezy.hr/json, with at most 40 posting-page JSON-LD description lookups per board.
+- Teamtailor: https://{board}.teamtailor.com/jobs.rss?per_page=100. Uses the documented public RSS; JSON requires an employer key.
+- BambooHR: https://{board}.bamboohr.com/careers/list plus /careers/{id}/detail, at most 100 jobs per board.
+- Personio (off): https://{board}.jobs.personio.de/xml.
 
 SQLite tables are companies, jobs and email_drafts. The default database is data/processed/outreach.db. Alembic manages schema migrations.
 
@@ -242,20 +256,22 @@ The NYC 311 analytics report discussed on 18 November is currently outside the Y
 
 ## 9. Cold-enquiry research and drafting
 
-Hosted delivery combines existing discovered employers, reviewed company records and the bounded Startups Gallery India sample. It prioritizes reviewed companies and examines up to 20 size-eligible careers candidates per call.
+Hosted delivery combines discovered employers (including portfolio records), reviewed company records, bounded funding CSV matches and Startups Gallery India leads. It orders reviewed employers first and rotates a window of up to 20 eligible employers per run, so research can reach newly discovered companies. The cursor is stored in data/processed/enquiry_research_cursor.json.
 
-For each candidate it checks an official HTTPS careers page, follows a bounded sequence of employer-domain redirects, and validates that target network addresses are public. Linked supported ATS boards may supply additional job records.
+For each candidate it checks up to five employer pages: careers, homepage/footer, /contact, /about and /team. External portfolio careers URLs fall back to the employer's own /careers path for contact research. The shared HTTP helper supplies an identifying User-Agent, delays, retries and timeouts; it validates public addresses before every redirect and refuses cross-employer contact-page redirects. Linked ATS boards supply additional job records only through enabled platform adapters. No endless link crawling occurs.
 
 Cold-email eligibility requires:
 
 1. A known company name, website, careers URL and acceptable employee count.
-2. A reachable employer careers page.
+2. A reachable current employer page within the bounded research set.
 3. No detected early-career technical role on the inspected page or associated board.
 4. A publicly published hiring address on the employer's domain.
 5. No matching application route that takes priority for this company.
 6. No previous Skip/Mark Applied for the enquiry and no sent/sending/uncertain outreach for its recipient.
 
-The code accepts recognized hiring inboxes such as careers/jobs/hiring/recruitment/talent. A named email needs nearby hiring context or a reviewed contact. Reviewed contacts must still be found on the current page. General business inboxes are not automatically considered hiring contacts.
+The code accepts careers/jobs/hiring/recruitment/talent inboxes from mailto links or plain page text. A named email needs short nearby hiring context or an explicitly reviewed contact. Reviewed contacts must still appear on the current page. hr/people inboxes were not added without evidence. HN leads in data/processed/hn_contact_leads.json only prioritize contacts that independently satisfy current employer-page validation; the HN post itself never grants permission.
+
+The sources.yaml enquiry_research option allow_generic_small_inboxes defaults to false. Explicitly enabling it allows hello/contact only when the entire published size is between 2 and 20 inclusive. A 1-10 or 11-50 band, unknown size or an open-ended count does not qualify. These inboxes remain disabled even when nearby text mentions hiring unless that flag and size condition both pass. The usual matching-role priority, history checks, resume attachment and individual approval remain in force.
 
 Enquiry delivery is email-only. Companies with only a careers form do not produce enquiry cards.
 
@@ -269,7 +285,9 @@ The draft subject is limited to 150 characters and the generated body to 120 wor
 
 ## 10. Hosted batch, actions and duplicate suppression
 
-Python sends an HMAC-SHA256-signed JSON payload over HTTPS using OUTREACH_SYNC_SECRET. The receiver validates the signature, a timestamp within ten minutes, run identity, card count, URLs and draft shapes.
+Python sends an HMAC-SHA256-signed JSON payload over HTTPS using OUTREACH_SYNC_SECRET. The receiver validates the signature, a timestamp within ten minutes, run identity, card count, URLs and draft shapes. An optional summary string (maximum 3500 characters) is inside that signed payload. When zero new cards are delivered, Apps Script sends one completion summary per run ID, retaining a bounded set of 32 heartbeat IDs. Repeated requests after a card was already delivered for the run do not add an empty-run message. All-source discovery failure attempts a signed failure summary and still exits with failure status.
+
+The CLI prints a per-source funnel in --digest-preview and discovery summaries. It labels stored normalized/eligible/routed inventory separately from last-fetch counts in data/processed/source_counts.json. Raw counts are available on new feed/portfolio adapters; older adapters report their returned records. Deduplicated jobs retain their stored source, so cross-source copies can show fetched records but zero stored records for the later source. Missing descriptions, unknown/cross-cap sizes and eligibility failures remain real exclusions. Routed counts precede Apps Script's final saved-action suppression.
 
 At most 100 cards are included in a batch. Ordering leaves the first 20 positions for job cards, then enquiries, then remaining jobs. Apps Script sends at most 30 review cards per delivery call.
 
@@ -389,20 +407,22 @@ For a code/source update, synchronize the intended committed files to the VM, in
 
 ## 16. Known gaps and limits relevant to daily volume
 
-1. A successful run can deliver zero cards. No completion heartbeat is currently sent when that happens.
+1. A successful run can deliver zero cards. The new signed heartbeat makes that visible after the VM code and Apps Script deployment are both updated. It cannot notify if the VM never starts or Google/Telegram is unreachable.
 2. Source listings can be duplicated, stale, senior, international or already handled. Raw counts are larger than the usable shortlist.
 3. Unknown-size companies are excluded. Researching and adding evidence can unlock listings already present in SQLite.
 4. Junior/fresher full-time discovery is broader than actual Telegram routing because graduate roles currently receive Potentially Eligible.
-5. Research coverage is bounded. Startups Gallery inspects ten profiles and enquiry research examines twenty eligible employers per call.
+5. Research coverage is bounded. Startups Gallery inspects ten profiles; enquiry research rotates twenty eligible employers and up to five current employer pages per call. Three Consider boards scan at most 75 company groups each. Supply is not guaranteed to meet 25-30 attempts per day.
 6. Published hiring contacts are sparse and require current website evidence. Some employers offer only forms.
 7. The cold-enquiry pipeline has produced zero drafts in recent verified runs.
 8. Website selector changes and rate limits can cause partial source results. The HTTP helper retries some network and transient-status failures, while the discovery pipeline isolates source failures.
 9. The SQLite freshness policy does not uniformly expire jobs missing from new fetches.
 10. Country/visa interpretation and graduation-year matching are incomplete across all adapters.
-11. There is no deployed automatic updater, independent service monitor, automatic retry chain or zero-card alert on the Oracle service.
+11. There is no deployed automatic updater, independent service monitor or automatic retry chain. A completed zero-card run can now report through Apps Script; missed VM execution still requires an independent monitor.
 12. Feed data and public pages can be used without subscription costs, while Gemini/Google/Oracle usage remains subject to the actual accounts' free allowances and availability.
 13. Human approval is required for sending each enquiry. Application form submission remains manual.
 14. The profile does not currently contain a general company-name blacklist such as Canva. The employee-count gate is the principal mechanism excluding large employers.
+15. Getro access is blocked/unverified and remains disabled. Consider's public UI search is unofficial and may change. No private/bearer API is used. XML/JSON endpoints that redirect or change shape fail safely rather than being interpreted as valid empty boards.
+16. Funding entries with unresolved domain/size cannot automatically become cold targets. HN contacts without employer-page hiring evidence remain unverified. None of these additions bypasses those gates.
 
 ## 17. Implementation map
 
@@ -413,6 +433,11 @@ All paths below are relative to the repository root.
 | CLI and orchestration | startup-outreach-agent/src/startup_agent/main.py |
 | Discovery orchestration and ATS expansion | startup-outreach-agent/src/startup_agent/discovery/pipeline.py |
 | Source adapters | startup-outreach-agent/src/startup_agent/discovery/ |
+| New portfolio, HN and remote adapters | discovery/portfolio.py, hn_hiring.py and remote_feeds.py under the Python package |
+| Additional ATS protocols | startup-outreach-agent/src/startup_agent/discovery/public_ats.py and direct_ats.py |
+| Funnel and signed zero-card summary | startup-outreach-agent/src/startup_agent/funnel.py, hosted_delivery.py and hosting/apps-script/Code.gs |
+| Public-address and bounded HTTP fetching | startup-outreach-agent/src/startup_agent/utils/http_client.py |
+| Fixture preview and deployment record | startup-outreach-agent/tests/test_new_source_preview.py and docs/NEW_SOURCES_VALIDATION.md |
 | Size gate | startup-outreach-agent/src/startup_agent/matching/startup_filter.py |
 | Classification and eligibility | startup-outreach-agent/src/startup_agent/matching/classifier.py and eligibility.py |
 | Ranking and scoring | startup-outreach-agent/src/startup_agent/matching/ranker.py and scorer.py |

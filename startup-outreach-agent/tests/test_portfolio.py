@@ -13,7 +13,14 @@ def test_consider_retains_evidence_and_rejects_restricted_and_senior():
     assert result.companies[0].employee_count == "11-50"
     assert result.companies[0].funding_stage == "Seed"
     assert result.jobs[0].job_url == "https://studio.example/careers/intern"
+    data = json.loads(FIXTURE.read_text())
+    row = data["jobs"][0]["jobs"][0]
+    row["locations"] = ["Bengaluru"]
+    row["normalizedLocations"] = [{"value":"Bengaluru, Karnataka, India"}]
+    assert len(parse_consider(data, "vc_test", "https://board.example").jobs) == 1
     assert size_band("201-500 employees") == "201-500"
+    assert size_band("1K-5K") is None
+    assert size_band("200-11") is None
     assert StartupEligibilityFilter(200, False).evaluate(size_band("51-250 employees")).status != StartupEligibilityStatus.ELIGIBLE
 
 def test_consider_bounded_and_no_token_in_persisted_data(tmp_path):

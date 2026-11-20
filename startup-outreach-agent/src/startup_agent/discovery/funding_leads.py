@@ -5,7 +5,6 @@ from datetime import date, datetime, timedelta
 from io import StringIO
 from urllib.parse import urlsplit
 import logging
-from bs4 import BeautifulSoup
 from startup_agent.utils.normalizers import normalize_name
 
 from startup_agent.utils.http_client import HttpClient
@@ -21,8 +20,8 @@ def funded_employers(reviewed: dict, client=None, today=None) -> list[dict]:
     """Resolve recent CSV company names using existing employer evidence only."""
     client = client or HttpClient(timeout=10, max_retries=1, public_only=True)
     cutoff = (today or date.today()) - timedelta(days=30)
-    known = {normalize_name(row.get("company_name", row.get("funding_tracker_name", ""))): (domain, row)
-             for domain, row in reviewed.items()}
+    known = {normalize_name(row[key]): (domain, row) for domain, row in reviewed.items()
+             for key in ("company_name", "funding_tracker_name") if row.get(key)}
     result = []
     try:
         reader = csv.DictReader(StringIO(client.get(CSV_URL).text.lstrip("\ufeff")))

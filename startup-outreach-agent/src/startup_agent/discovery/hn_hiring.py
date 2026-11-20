@@ -27,7 +27,9 @@ def parse_comment(comment, employers):
     heading = body.split("|")[0].strip()[:160]
     name = heading.split(" - ")[0].strip()
     location = india_location(body)
-    title = " | ".join(body.split("|")[:5])[:220]
+    header = page.get_text("\n", strip=True).splitlines()[0]
+    role = next((part.strip() for part in header.split("|") if _is_target_role(part)), None)
+    title = role or " | ".join(body.split("|")[:5])[:220]
     if not location or not _is_target_role(title) or not EARLY.search(body):
         return None
     urls = [str(a["href"]) for a in page.select("a[href]") if urlsplit(str(a["href"])).scheme == "https"]
@@ -46,8 +48,11 @@ def parse_comment(comment, employers):
                     or re.search(r"/(?:jobs?|careers?|positions?)(?:/|$)", urlsplit(u).path)), source)
     company = Company(company_name=name, website="https://"+domain, employee_count=evidence.get("employee_count"),
         source_name="hn_hiring", source_url=source, careers_url=evidence.get("careers_url"))
-    job = Job(job_title=title, job_url=job_url, company_name=name, company_website=company.website,
-        source_name="hn_hiring", source_job_id=str(comment["id"]), description=body, location=location, status="open")
+    # Existing routing recognizes inboxes in job descriptions. Redact post emails
+    # here so that an HN lead cannot become a contact through that older path.
+    safe_body = EMAIL.sub("[contact withheld]", body)
+    job = Job(job_title=EMAIL.sub("[contact withheld]", title), job_url=job_url, company_name=name, company_website=company.website,
+        source_name="hn_hiring", source_job_id=str(comment["id"]), description=safe_body, location=location, status="open")
     leads = [{"domain": domain, "email": a.lower(), "evidence_url": source, "verified": False}
              for a in sorted(set(EMAIL.findall(body))) if a.rsplit("@",1)[1].lower() == domain.lower()]
     return company, job, leads

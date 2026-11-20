@@ -8,6 +8,9 @@ from collections import Counter
 import yaml
 from typing import Dict, List, Optional, Tuple, Type
 from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from startup_agent.database.models import CompanyModel
 
 from startup_agent.config.settings import Settings
 from startup_agent.database.engine import create_db_engine
@@ -36,6 +39,7 @@ from startup_agent.matching.startup_filter import (
     StartupEligibilityStatus,
 )
 from startup_agent.utils.http_client import HttpClient
+from startup_agent.funnel import funnel_source
 
 logger = logging.getLogger("startup_agent.discovery.pipeline")
 
@@ -126,8 +130,9 @@ class DiscoveryPipeline:
             return self.custom_adapters
 
         adapters: List[BaseDiscoverySource] = []
+        employers = self._known_employers()
         for src in self.settings.sources:
-            if src.type == "ats_platform":
+            if src.type in {"ats_platform", "enquiry_options"}:
                 continue
             if not src.enabled:
                 continue
@@ -135,12 +140,8 @@ class DiscoveryPipeline:
             if src.type == "vc_portfolio":
                 adapters.append(PortfolioDiscoverySource(src.name, src.url, src.options))
             elif src.name in FEEDS:
-                employers = {normalize_name(e["company_name"]): (domain, e)
-                             for domain, e in self.size_evidence.items() if e.get("company_name")}
                 adapters.append(RemoteFeedDiscoverySource(employers, src.name))
             elif src.name == "hn_hiring":
-                employers = {normalize_name(e["company_name"]): (domain, e)
-                             for domain, e in self.size_evidence.items() if e.get("company_name")}
                 adapters.append(HnHiringDiscoverySource(employers, leads_path=self.settings.data_dir / "processed/hn_contact_leads.json"))
             elif adapter_cls in (HimalayasDiscoverySource, RemotiveDiscoverySource):
                 reviewed = [
@@ -179,6 +180,30 @@ class DiscoveryPipeline:
             else:
                 logger.warning("No registered discovery adapter for source: '%s'", src.name)
         return adapters
+
+    def _known_employers(self):
+        """Reuse persisted portfolio evidence on later runs without auto-editing reviewed YAML."""
+        employers = {}
+        def collect(session):
+            for company in session.scalars(select(CompanyModel)):
+                domain = normalize_website(company.website).split("/", 1)[0]
+                if company.employee_count and company.source_url:
+                    employers[company.normalized_name] = (domain, {
+                        "employee_count": company.employee_count, "source_url": company.source_url,
+                        "careers_url": company.careers_url,
+                    })
+        try:
+            if self.session is not None:
+                collect(self.session)
+            else:
+                factory = create_session_factory(create_db_engine(self.settings.database_url))
+                with factory() as session:
+                    collect(session)
+        except SQLAlchemyError:
+            logger.warning("Stored employer evidence unavailable; using reviewed configuration.")
+        employers.update({normalize_name(e["company_name"]): (domain, e)
+                          for domain, e in self.size_evidence.items() if e.get("company_name")})
+        return employers
 
     def run(self) -> DiscoverySummary:
         """Execute the discovery pipeline across all resolved sources."""
@@ -257,8 +282,16 @@ class DiscoveryPipeline:
 
         summary.duration_seconds = round(time.time() - start_time, 2)
         self.settings.data_dir.joinpath("processed").mkdir(parents=True, exist_ok=True)
+        adapter_names = set(source_counts)
         for name, count in Counter(job.source_name for job in collected_jobs).items():
-            source_counts.setdefault(name, {"fetched": count, "rejections": {}, "error": ""})
+            label = funnel_source(name)
+            if label not in source_counts:
+                source_counts[label] = {"fetched": 0, "rejections": {}, "error": ""}
+            if label.startswith("ats_") and label not in adapter_names:
+                source_counts[label]["fetched"] += count
+        for source in self.settings.sources:
+            if source.type == "ats_platform" and source.enabled:
+                source_counts.setdefault(source.name, {"fetched": 0, "rejections": {}, "error": ""})
         self.settings.data_dir.joinpath("processed/source_counts.json").write_text(
             json.dumps(source_counts), encoding="utf-8",
         )
