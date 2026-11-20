@@ -1,5 +1,11 @@
 version: "1.0"
 sources:
+  - name: hn_hiring
+    display_name: HN Who is hiring
+    type: public_jobs_api
+    enabled: true
+    url: https://hn.algolia.com/api/v1
+    description: Latest monthly top-level posts; unknown size excluded and email leads require employer verification.
   - {name: ats_workable, display_name: Workable, type: ats_platform, enabled: true, description: Public widget API for confirmed employers.}
   - {name: ats_breezy, display_name: Breezy HR, type: ats_platform, enabled: true, description: Public JSON and bounded job descriptions.}
   - {name: ats_teamtailor, display_name: Teamtailor, type: ats_platform, enabled: true, description: Public RSS; JSON API requires a key.}
