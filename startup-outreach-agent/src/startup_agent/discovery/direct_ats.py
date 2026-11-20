@@ -10,6 +10,7 @@ from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 from startup_agent.utils.http_client import HttpClient
+from startup_agent.discovery.public_ats import PLATFORMS, fetch_public_ats
 
 logger = logging.getLogger("startup_agent.discovery.ats")
 
@@ -57,6 +58,13 @@ def extract_ats_target(
         platform = "recruitee"
         board_token = parsed.hostname.split(".")[0]
 
+    if host == "apply.workable.com" and path_parts and path_parts[0] not in {"j", "api"}:
+        platform, board_token = "workable", path_parts[0]
+    for suffix, kind in (("breezy.hr", "breezy"), ("teamtailor.com", "teamtailor"),
+                         ("bamboohr.com", "bamboohr"), ("jobs.personio.de", "personio")):
+        if parsed.hostname and re.fullmatch(r"[a-z0-9-]+\." + re.escape(suffix), parsed.hostname):
+            platform, board_token = kind, parsed.hostname.split(".")[0]
+
     if not platform or not board_token:
         return None
 
@@ -80,10 +88,12 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
         enabled: bool = True,
         targets: Optional[List[Dict[str, str]]] = None,
         http_client: Optional[HttpClient] = None,
+        platforms=None,
     ) -> None:
         super().__init__(name=name, enabled=enabled)
         self.targets = targets if targets is not None else DEFAULT_ATS_TARGETS
-        self.http_client = http_client or HttpClient()
+        self.http_client = http_client or HttpClient(public_only=True)
+        self.platforms = set(platforms) if platforms is not None else {"greenhouse", "ashby", "lever", "recruitee", "workable", "breezy", "teamtailor", "bamboohr"}
 
     def _discover_greenhouse(self, target: Dict[str, str]) -> List[Job]:
         """Fetch jobs from public Greenhouse boards API."""
@@ -249,6 +259,13 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
         return jobs
 
     def fetch_board_jobs(self, target: Dict[str, str]) -> List[Job]:
+        platform = target["platform"].lower()
+        if platform not in self.platforms:
+            return []
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", target["board_token"]):
+            raise ValueError("Unsafe ATS board token")
+        if platform in PLATFORMS:
+            return fetch_public_ats(target, self.http_client)
         fetch = {
             "greenhouse": self._discover_greenhouse,
             "ashby": self._discover_ashby,
@@ -273,7 +290,7 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
             website = target.get("website", "")
             board_token = target.get("board_token", "")
 
-            if not company_name or not website or platform not in {"greenhouse", "ashby", "lever", "recruitee"}:
+            if not company_name or not website or platform not in self.platforms:
                 continue
             if platform == "recruitee" and not re.fullmatch(r"[a-z0-9-]+", board_token):
                 continue

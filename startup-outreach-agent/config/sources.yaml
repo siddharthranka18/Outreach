@@ -1,5 +1,10 @@
 version: "1.0"
 sources:
+  - {name: ats_workable, display_name: Workable, type: ats_platform, enabled: true, description: Public widget API for confirmed employers.}
+  - {name: ats_breezy, display_name: Breezy HR, type: ats_platform, enabled: true, description: Public JSON and bounded job descriptions.}
+  - {name: ats_teamtailor, display_name: Teamtailor, type: ats_platform, enabled: true, description: Public RSS; JSON API requires a key.}
+  - {name: ats_bamboohr, display_name: BambooHR, type: ats_platform, enabled: true, description: Public careers list and detail JSON.}
+  - {name: ats_personio, display_name: Personio, type: ats_platform, enabled: false, description: Optional XML feed; leave disabled until employer board verified.}
   - name: vc_peakxv
     display_name: Peak XV portfolio
     type: vc_portfolio

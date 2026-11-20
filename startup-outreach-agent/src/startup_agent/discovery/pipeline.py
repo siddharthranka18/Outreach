@@ -97,6 +97,10 @@ class DiscoveryPipeline:
         self.session = session
         self.custom_adapters = custom_adapters
         self.ats_http_client = ats_http_client
+        flags = {s.name.removeprefix("ats_"): s.enabled for s in self.settings.sources if s.type == "ats_platform"}
+        self.ats_platforms = {"greenhouse", "ashby", "lever", "recruitee"} | {name for name, enabled in flags.items() if enabled}
+        if not flags:  # Preserve programmatic configurations predating platform flags.
+            self.ats_platforms |= {"workable", "breezy", "teamtailor", "bamboohr"}
         self.auto_expand_ats = auto_expand_ats
         evidence_path = self.settings.config_dir / "company_sizes.yaml"
         self.size_evidence = (
@@ -121,6 +125,8 @@ class DiscoveryPipeline:
 
         adapters: List[BaseDiscoverySource] = []
         for src in self.settings.sources:
+            if src.type == "ats_platform":
+                continue
             if not src.enabled:
                 continue
             adapter_cls = SOURCE_ADAPTER_REGISTRY.get(src.name)
@@ -156,6 +162,7 @@ class DiscoveryPipeline:
                         targets.append(target)
                 adapters.append(DirectAtsDiscoverySource(
                     name=src.name, targets=targets, http_client=self.ats_http_client,
+                    platforms=self.ats_platforms,
                 ))
             elif adapter_cls:
                 adapters.append(adapter_cls(name=src.name, enabled=True))
@@ -325,6 +332,8 @@ class DiscoveryPipeline:
             )
             if target is None:
                 continue
+            if target["platform"] not in self.ats_platforms:
+                continue
 
             board_key = (target["platform"], target["board_token"])
             if board_key in seen_boards:
@@ -340,6 +349,7 @@ class DiscoveryPipeline:
             name="auto_discovered_ats",
             targets=targets,
             http_client=self.ats_http_client,
+            platforms=self.ats_platforms,
         )
         return adapter.discover(), len(targets)
 
