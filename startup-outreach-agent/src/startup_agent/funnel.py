@@ -35,7 +35,11 @@ def source_funnel(session, settings):
     fetched = json.loads(path.read_text()) if path.is_file() else {}
     for name, count in fetched.items():
         row = counts.setdefault(name, dict(normalized=0, size_known=0, size_eligible=0, role_eligible=0, routed=0))
-        row["fetched"] = count
+        row["fetched"] = count.get("fetched", 0) if isinstance(count, dict) else count
+        if isinstance(count, dict):
+            row["error"] = count.get("error", "")
+            row["rejections"] = count.get("rejections", {})
+            reasons.update(row["rejections"])
     return {"sources": counts, "rejections": dict(reasons.most_common(3))}
 
 
@@ -45,5 +49,9 @@ def format_funnel(funnel):
         lines.append(f"{name}: fetched={row.get('fetched', 'n/a')} → normalized={row['normalized']} "
                      f"→ size-known={row['size_known']} → size-eligible={row['size_eligible']} "
                      f"→ role/fresher-eligible={row['role_eligible']} → routed={row['routed']}")
+        if row.get("error"):
+            lines.append(f"  source failed: {row['error']}")
+        if row.get("rejections"):
+            lines.append("  " + "; ".join(f"{k}: {v}" for k, v in Counter(row["rejections"]).most_common(3)))
     lines.extend(f"{reason}: {count}" for reason, count in funnel["rejections"].items())
     return "\n".join(lines)

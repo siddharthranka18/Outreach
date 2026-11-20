@@ -1,5 +1,8 @@
 version: "1.0"
 sources:
+  - {name: remoteok, display_name: Remote OK, type: public_jobs_api, enabled: true, url: 'https://remoteok.com/api', description: Explicit India/worldwide technical early-career titles with reviewed employers.}
+  - {name: jobicy, display_name: Jobicy, type: public_jobs_api, enabled: true, url: 'https://jobicy.com/api/v2/remote-jobs', description: Explicit India/worldwide technical early-career titles with reviewed employers.}
+  - {name: working_nomads, display_name: Working Nomads, type: public_jobs_api, enabled: true, url: 'https://www.workingnomads.com/api/exposed_jobs/', description: Explicit India/worldwide technical early-career titles with reviewed employers.}
   - name: hn_hiring
     display_name: HN Who is hiring
     type: public_jobs_api

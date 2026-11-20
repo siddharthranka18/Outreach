@@ -109,7 +109,10 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
             relevant_projects=tuple(match.relevant_projects),
             matching_skills=tuple(match.matching_skills),
             category=match.category,
-            source_label={"remotive": "Remotive", "himalayas": "Himalayas"}.get(job.source_name, ""),
+            source_label={"remotive": "Remotive", "himalayas": "Himalayas", "remoteok": "Remote OK",
+                          "jobicy": "Jobicy", "working_nomads": "Working Nomads", "hn_hiring": "Hacker News Who is hiring",
+                          "vc_peakxv": "Peak XV portfolio", "vc_lightspeed": "Lightspeed portfolio",
+                          "vc_bessemer": "Bessemer portfolio", "vc_nexus": "Nexus portfolio"}.get(job.source_name, ""),
             asks_for_internship=bool(re.search(
                 r"\b(?:prior|previous|completed)\b[^.!?\n]{0,50}\binternship\b"
                 r"|\binternship experience\b",

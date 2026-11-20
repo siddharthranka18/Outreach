@@ -16,6 +16,7 @@ from startup_agent.database.session import create_session_factory, session_scope
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
 from startup_agent.discovery.portfolio import PortfolioDiscoverySource
 from startup_agent.discovery.hn_hiring import HnHiringDiscoverySource
+from startup_agent.discovery.remote_feeds import FEEDS, RemoteFeedDiscoverySource
 from startup_agent.discovery.andhra_startup_map import AndhraStartupMapDiscoverySource
 from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource, extract_ats_target
 from startup_agent.discovery.hasjob import HasjobDiscoverySource
@@ -133,6 +134,10 @@ class DiscoveryPipeline:
             adapter_cls = SOURCE_ADAPTER_REGISTRY.get(src.name)
             if src.type == "vc_portfolio":
                 adapters.append(PortfolioDiscoverySource(src.name, src.url, src.options))
+            elif src.name in FEEDS:
+                employers = {normalize_name(e["company_name"]): (domain, e)
+                             for domain, e in self.size_evidence.items() if e.get("company_name")}
+                adapters.append(RemoteFeedDiscoverySource(employers, src.name))
             elif src.name == "hn_hiring":
                 employers = {normalize_name(e["company_name"]): (domain, e)
                              for domain, e in self.size_evidence.items() if e.get("company_name")}
@@ -187,11 +192,13 @@ class DiscoveryPipeline:
 
         collected_companies: List[Company] = []
         collected_jobs: List[Job] = []
+        source_counts = {}
 
         # 1. Source Discovery Phase with Source-Level Isolation
         for adapter in adapters:
             summary.sources_attempted += 1
             logger.info("Starting discovery for source: '%s'...", adapter.name)
+            source_counts[adapter.name] = {"fetched": 0, "rejections": {}, "error": ""}
             try:
                 raw_result = adapter.discover()
                 if isinstance(raw_result, DiscoveryResult):
@@ -206,6 +213,10 @@ class DiscoveryPipeline:
 
                 collected_companies.extend(discovered_cos)
                 collected_jobs.extend(discovered_jbs)
+                source_counts[adapter.name] = {
+                    "fetched": getattr(adapter, "fetched_count", len(discovered_jbs)),
+                    "rejections": dict(getattr(adapter, "rejections", {})), "error": "",
+                }
                 summary.sources_successful += 1
                 logger.info(
                     "Source '%s' completed successfully (%d companies, %d jobs).",
@@ -216,6 +227,7 @@ class DiscoveryPipeline:
             except Exception as exc:
                 logger.error("Source '%s' encountered an unhandled error: %s", adapter.name, exc, exc_info=True)
                 summary.sources_failed.append((adapter.name, str(exc)))
+                source_counts[adapter.name]["error"] = type(exc).__name__
 
         summary.companies_discovered = len(collected_companies)
         summary.jobs_discovered = len(collected_jobs)
@@ -245,9 +257,10 @@ class DiscoveryPipeline:
 
         summary.duration_seconds = round(time.time() - start_time, 2)
         self.settings.data_dir.joinpath("processed").mkdir(parents=True, exist_ok=True)
-        counts = Counter(job.source_name for job in collected_jobs)
+        for name, count in Counter(job.source_name for job in collected_jobs).items():
+            source_counts.setdefault(name, {"fetched": count, "rejections": {}, "error": ""})
         self.settings.data_dir.joinpath("processed/source_counts.json").write_text(
-            json.dumps(dict(counts)), encoding="utf-8",
+            json.dumps(source_counts), encoding="utf-8",
         )
         logger.info(
             "Discovery pipeline completed in %.2fs: %d companies (+%d, ~%d), %d jobs (+%d, ~%d).",
