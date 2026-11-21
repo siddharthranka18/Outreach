@@ -235,6 +235,7 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
     eligible = [
         (domain, lead) for domain, lead in ordered
         if lead.get("company_name") and lead.get("careers_url")
+        and reviewed.get(domain, {}).get("public_board_only") is not True
         and size_filter.evaluate(lead.get("employee_count")).status == StartupEligibilityStatus.ELIGIBLE
     ]
     handled={entry.get('url') for entry in history or [] if entry.get('status') in {'skipped','applied'}

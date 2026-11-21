@@ -30,6 +30,7 @@ from startup_agent.discovery.remotive import RemotiveDiscoverySource
 from startup_agent.discovery.venomics import VenomicsDiscoverySource
 from startup_agent.discovery.reviewed_careers import ReviewedCareersDiscoverySource
 from startup_agent.discovery.freehire import FreehireDiscoverySource, verify_freehire_jobs
+from startup_agent.discovery.curated_boards import CuratedStartupDiscoverySource, curated_targets
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
 from startup_agent.discovery.wellfound import WellfoundDiscoverySource
 from startup_agent.discovery.y_combinator import YCombinatorDiscoverySource
@@ -134,6 +135,10 @@ class DiscoveryPipeline:
             max_employees=max_startup_employees,
             allow_unknown=False,
         )
+        self.curated_domains = {domain for domain, item in self.size_evidence.items()
+                                if item.get("public_board_only") is True}
+        self.curated_board_keys = {(target["platform"], target["board_token"])
+                                   for target in curated_targets(self.size_evidence)}
 
     def _resolve_adapters(self) -> List[BaseDiscoverySource]:
         """Resolve enabled source adapter instances based on configuration."""
@@ -171,6 +176,9 @@ class DiscoveryPipeline:
                 adapters.append(FreehireDiscoverySource(employers,
                     self.settings.data_dir / "processed/freehire_facets.json", src.options,
                     known_boards=self._stored_ats_targets()))
+            elif src.name == "curated_startup_boards":
+                adapters.append(CuratedStartupDiscoverySource(self.size_evidence,
+                    self.settings.data_dir / "processed/curated_board_cooldowns.json"))
             elif src.name == "hn_hiring":
                 adapters.append(HnHiringDiscoverySource(employers, leads_path=self.settings.data_dir / "processed/hn_contact_leads.json"))
             elif adapter_cls in (HimalayasDiscoverySource, RemotiveDiscoverySource):
@@ -185,8 +193,12 @@ class DiscoveryPipeline:
                 else:
                     adapters.append(RemotiveDiscoverySource(by_name, name=src.name))
             elif adapter_cls is DirectAtsDiscoverySource:
-                targets = self._stored_ats_targets()
+                targets = [target for target in self._stored_ats_targets()
+                           if (target["platform"], target["board_token"]) not in self.curated_board_keys
+                           and normalize_website(target["website"]).split("/", 1)[0] not in self.curated_domains]
                 for domain, evidence in self.size_evidence.items():
+                    if domain in self.curated_domains:
+                        continue
                     board_url = evidence.get("ats_url")
                     company_name = evidence.get("company_name")
                     size = evidence.get("employee_count")
@@ -223,7 +235,7 @@ class DiscoveryPipeline:
             if isinstance(adapter,PortfolioDiscoverySource):return 0
             if isinstance(adapter,YCombinatorDiscoverySource):
                 return 2 if adapter.include_jobs else 0
-            return 3 if isinstance(adapter,DirectAtsDiscoverySource) else 1
+            return 3 if isinstance(adapter,DirectAtsDiscoverySource) and not isinstance(adapter,CuratedStartupDiscoverySource) else 1
         return sorted(adapters,key=priority)
 
     def _stored_ats_targets(self):
@@ -470,6 +482,8 @@ class DiscoveryPipeline:
                 company = company_by_name.get(normalize_name(job.company_name))
             if company is None:
                 continue
+            if company.normalized_website.split("/", 1)[0] in self.curated_domains:
+                continue
 
             size_result = self.startup_filter.evaluate(company.employee_count)
             if size_result.status != StartupEligibilityStatus.ELIGIBLE:
@@ -487,7 +501,7 @@ class DiscoveryPipeline:
                 continue
 
             board_key = (target["platform"], target["board_token"])
-            if board_key in seen_boards:
+            if board_key in seen_boards or board_key in self.curated_board_keys:
                 continue
             seen_boards.add(board_key)
             targets.append(target)

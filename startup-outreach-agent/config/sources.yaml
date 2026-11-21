@@ -1,5 +1,10 @@
 version: "1.0"
 sources:
+  - name: curated_startup_boards
+    display_name: Reviewed startup portfolio boards
+    type: public_jobs_api
+    enabled: true
+    description: Local startup leads and verified employer boards polled through documented public read APIs.
   - name: job_opportunities
     display_name: Job Opportunities API optional free key
     type: public_jobs_api

@@ -1,4 +1,47 @@
 # Publicly reported employee bands, keyed by the employer's official domain.
+# Curated portfolio evidence is loaded offline. Missing sizes remain unknown.
+bolna.ai:
+  company_name: Bolna AI
+  employee_count: "21"
+  source_url: https://www.ycombinator.com/companies/bolna-ai/jobs
+  discovery_url: https://www.ycombinator.com/companies/bolna-ai
+  ats_url: https://jobs.ashbyhq.com/bolna
+  checked_on: 2026-11-22
+  public_board_only: true
+gushwork.ai:
+  company_name: Gushwork
+  source_url: https://www.gushwork.ai/careers
+  discovery_url: https://indianstartups.work/
+  ats_url: https://jobs.lever.co/gushwork
+  checked_on: 2026-11-22
+  public_board_only: true
+meetaugust.ai:
+  company_name: August AI
+  employee_count: "11-50"
+  source_url: https://jobs.accel.com/companies/august-ai
+  discovery_url: https://surge.peakxv.com/companies/august-ai
+  checked_on: 2026-11-22
+  public_board_only: true
+kello.ai:
+  company_name: Kello
+  source_url: https://surge.peakxv.com/companies/kello
+  checked_on: 2026-11-22
+  public_board_only: true
+hiloop.ai:
+  company_name: hiloop
+  source_url: https://surge.peakxv.com/companies/hiloop
+  checked_on: 2026-11-22
+  public_board_only: true
+getdodge.ai:
+  company_name: Dodge AI
+  source_url: https://atoms.accel.com/news/meet-the-startups-in-ai-cohort-2026
+  checked_on: 2026-11-22
+  public_board_only: true
+levelplane.com:
+  company_name: LevelPlane
+  source_url: https://atoms.accel.com/news/meet-the-startups-in-ai-cohort-2026
+  checked_on: 2026-11-22
+  public_board_only: true
 truefoundry.com:
   company_name: TrueFoundry
   employee_count: "51-200"
@@ -30,6 +73,8 @@ airbound.com:
   checked_on: 2026-11-12
   discovery_url: https://startups.gallery/companies/airbound
   careers_url: https://www.airbound.com/careers
+  ats_url: https://jobs.ashbyhq.com/airbound
+  public_board_only: true
   enquiry_form: true
 stance.health:
   company_name: Stance Health
