@@ -1,6 +1,7 @@
 """Render local outreach previews using evidence from the candidate profile."""
 
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -9,8 +10,10 @@ import httpx
 
 from startup_agent.matching.profile import CandidateProfile
 from startup_agent.routing import OutreachRoute
+from startup_agent.utils.posting_guard import sanitize_untrusted_text
 
 GEMINI_MODEL = "gemini-3.1-flash-lite"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -116,7 +119,10 @@ def generate_email_draft(
             "ai_ml": profile.skills.ai_ml,
             "tools": profile.skills.tools,
         }
-        facts["published_company_context"] = enquiry_context
+        cleaned_context, flags = sanitize_untrusted_text(enquiry_context)
+        if flags:
+            logger.info("Cleaned untrusted enquiry context (%s).", ", ".join(flags))
+        facts["published_company_context"] = cleaned_context
         enquiry_instruction = (
             " This is a broad software / CSE internship enquiry, not an application for a specific role. "
             "Ask about suitable software internships across backend, full-stack and AI-related work. "

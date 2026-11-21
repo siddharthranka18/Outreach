@@ -136,7 +136,7 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
             matching_skills=tuple(match.matching_skills),
             category=match.category,
             source_label={"remotive": "Remotive", "himalayas": "Himalayas", "remoteok": "Remote OK",
-                          "jobicy": "Jobicy", "working_nomads": "Working Nomads", "hn_hiring": "Hacker News Who is hiring",
+                          "jobicy": "Jobicy", "freehire": "Freehire", "working_nomads": "Working Nomads", "hn_hiring": "Hacker News Who is hiring",
                           "vc_peakxv": "Peak XV portfolio", "vc_lightspeed": "Lightspeed portfolio",
                           "vc_bessemer": "Bessemer portfolio", "vc_nexus": "Nexus portfolio",
                           "vc_bain":"Bain Capital Ventures", "vc_courtside":"Courtside Ventures",

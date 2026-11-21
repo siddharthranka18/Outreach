@@ -344,6 +344,9 @@ function verifiedShortlist(event) {
       !Array.isArray(batch.cards) || batch.cards.length > 100 ||
       batch.cards.some(card => typeof card?.text !== 'string' || !card.text || card.text.length > 4000 ||
         typeof card.job_url !== 'string' || !/^https?:\/\/\S+$/i.test(card.job_url) ||
+        (card.canonical_job_key !== undefined && (card.draft || !/^[a-f0-9]{24}$/.test(card.canonical_job_key))) ||
+        (card.alias_urls !== undefined && (!Array.isArray(card.alias_urls) || card.alias_urls.length > 20 ||
+          card.alias_urls.some(url => typeof url !== 'string' || !/^https?:\/\/\S+$/i.test(url)))) ||
         (card.draft && !validHostedDraft(card.draft)))) {
     throw new Error('Invalid hosted shortlist.');
   }
@@ -458,7 +461,9 @@ function publishHostedCards(batch) {
   const config = settings();
   const {sheet, rows} = hostedHistory();
   sheet.getRange(1, 6).setValue('last_delivery_run');
+  sheet.getRange(1, 7).setValue('canonical_job_key');
   const byUrl = new Map();
+  const byKey = new Map();
   const activeEnquiries = new Set(batch.cards.filter(card => card.draft).map(card => card.job_url));
   rows.forEach((row, index) => {
     if (row[1]?.endsWith('/#outreach-enquiry') && row[3] === 'pending' &&
@@ -472,6 +477,10 @@ function publishHostedCards(batch) {
     const identity = hostedJobIdentity(row[1]);
     if (!byUrl.has(identity)) byUrl.set(identity, []);
     byUrl.get(identity).push({values: row, number: index + 2});
+    if (row[6]) {
+      if (!byKey.has(row[6])) byKey.set(row[6], []);
+      byKey.get(row[6]).push({values: row, number: index + 2});
+    }
   });
   SpreadsheetApp.flush();
   let sent = 0;
@@ -481,9 +490,12 @@ function publishHostedCards(batch) {
   const seen = new Set();
   for (const card of batch.cards) {
     const identity = hostedJobIdentity(card.job_url);
-    if (seen.has(identity)) continue;
+    const keyIdentity = card.canonical_job_key && `canonical:${card.canonical_job_key}`;
+    if (seen.has(identity) || (keyIdentity && seen.has(keyIdentity))) continue;
     seen.add(identity);
-    const matches = byUrl.get(identity) || [];
+    if (keyIdentity) seen.add(keyIdentity);
+    const matches = [...(byUrl.get(identity) || []), ...(byKey.get(card.canonical_job_key) || []),
+      ...(card.alias_urls || []).flatMap(url => byUrl.get(hostedJobIdentity(url)) || [])];
     if (matches.some(row => ['skipped', 'applied'].includes(row.values[2]) ||
         String(row.values[5]) === batch.run_id)) continue;
     if (card.draft && (
@@ -516,6 +528,7 @@ function publishHostedCards(batch) {
       continue;
     }
     const key = jobKey(matches[0]?.values[1] || card.job_url);
+    if (card.canonical_job_key) sheet.getRange(rowNumber, 7).setValue(card.canonical_job_key);
     telegram(config, 'sendMessage', {
       chat_id: config.chatId,
       text: card.text,

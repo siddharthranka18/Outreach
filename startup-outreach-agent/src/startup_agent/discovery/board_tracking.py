@@ -48,7 +48,9 @@ def sweep_stale(session, successful_polls=(), now=None):
             if key in snapshots:
                 job.missing_ats_polls = 0 if job.normalized_job_url in snapshots[key] else (job.missing_ats_polls or 0)+1
         # An old advert that remains live must not be closed just because of its original date.
-        stale = job.last_seen_at and job.last_seen_at.replace(tzinfo=None) < cutoff
+        last_confirmed = max(value.replace(tzinfo=None) for value in
+                             (job.last_seen_at, job.last_verified_open_at) if value)
+        stale = last_confirmed < cutoff
         if stale or job.missing_ats_polls >= 3:
             job.status = "closed"
             closed += 1

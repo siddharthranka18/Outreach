@@ -39,6 +39,9 @@ class CompanyModel(Base):
     careers_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     hiring_status: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     ats_boards: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_researched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    research_status: Mapped[Optional[str]] = mapped_column(String(30))
+    research_contact: Mapped[Optional[str]] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -104,6 +107,8 @@ class JobModel(Base):
     )
     status: Mapped[str] = mapped_column(String(50), default="open", nullable=False)
     missing_ats_polls: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    canonical_job_key: Mapped[Optional[str]] = mapped_column(String(24), index=True)
+    last_verified_open_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

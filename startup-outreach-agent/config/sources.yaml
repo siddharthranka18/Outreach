@@ -125,6 +125,13 @@ sources:
     description: Five employer pages; selected general inboxes for published 2-50 staff and current monthly HN hiring evidence.
     options: {allow_generic_small_inboxes: true, trust_hn_hiring_contacts: true, max_employers: 80, max_new_drafts: 15, gallery_profiles: 60, max_seconds: 900}
   - {name: remoteok, display_name: Remote OK, type: public_jobs_api, enabled: true, url: 'https://remoteok.com/api', description: Explicit India/worldwide technical early-career titles with reviewed employers.}
+  - name: freehire
+    display_name: Freehire
+    type: public_jobs_api
+    enabled: true
+    url: https://freehire.me/api/v1/agent/jobs/search
+    description: Recent technical internships and junior jobs in India, plus worldwide remote internships.
+    options: {page_size: 25, max_pages_per_query: 2, company_lookups: 8}
   - {name: jobicy, display_name: Jobicy, type: public_jobs_api, enabled: true, url: 'https://jobicy.com/api/v2/remote-jobs', description: Explicit India/worldwide technical early-career titles with reviewed employers.}
   - {name: working_nomads, display_name: Working Nomads, type: public_jobs_api, enabled: true, url: 'https://www.workingnomads.com/api/exposed_jobs/', description: Explicit India/worldwide technical early-career titles with reviewed employers.}
   - name: hn_hiring

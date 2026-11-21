@@ -40,4 +40,14 @@ assert.equal(calls.length, 2);
 rows = [['','https://studio.example/job','open','','','local-125']];
 context.publishHostedCards({...batch, run_id: 'local-125'});
 assert.equal(calls.length, 2);
+const oldUrl = 'https://old.example/software-intern';
+const newUrl = 'https://new.example/software-intern';
+const canonical = '123456789012345678901234';
+const newCard = {job_url: newUrl, text: 'Software Intern', canonical_job_key: canonical};
+rows = [['', oldUrl, 'applied', '', '', 'local-125']];
+assert.equal(context.publishHostedCards({...batch, run_id: 'local-126', summary: undefined,
+  cards: [{...newCard, alias_urls: [oldUrl]}]}), 0);
+rows[0][6] = canonical;
+assert.equal(context.publishHostedCards({...batch, run_id: 'local-126', summary: undefined, cards: [newCard]}), 0);
+assert.equal(calls.length, 2);
 console.log('Apps Script heartbeat, replay suppression, HMAC and timestamp tests passed.');

@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from startup_agent.database.models import CompanyModel, JobModel
+from startup_agent.utils.job_key import canonical_job_key
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 from startup_agent.utils.normalizers import (
@@ -269,7 +270,19 @@ class JobRepository:
             )
             existing = self.session.execute(stmt).scalars().first()
 
-        # 3. Match by normalized title and location for the same company
+        company = self.session.get(CompanyModel, company_id)
+        key = canonical_job_key(company.website, job.job_title, job.location) if company else None
+        if not existing and key:
+            matches = list(self.session.scalars(select(JobModel).where(
+                JobModel.company_id == company_id, JobModel.canonical_job_key == key,
+                JobModel.source_name != source_name,
+            ).limit(2)))
+            if len(matches) == 1:
+                existing = matches[0]
+                if source_name == "freehire":
+                    return existing, False
+
+        # 4. Match by normalized title and location for the same company
         if not existing and norm_title:
             location_val = job.location.strip().lower() if job.location else None
             stmt = select(JobModel).where(
@@ -304,6 +317,15 @@ class JobRepository:
                     setattr(existing, attr, incoming_val)
 
             existing.last_seen_at = now
+            if existing.source_name == source_name:
+                existing.canonical_job_key = key or existing.canonical_job_key
+                if source_name == "freehire":
+                    existing.last_verified_open_at = now
+            elif (existing.source_name == "freehire" and existing.normalized_job_url == norm_url
+                  and existing.status not in {"skipped", "applied"}):
+                # The native board is authoritative once it observes this posting.
+                existing.source_name = source_name
+                existing.source_job_id = source_job_id
             existing.updated_at = now
             if existing.status not in {"skipped", "applied"}:
                 existing.status = getattr(job, "status", "open") or "open"
@@ -311,6 +333,9 @@ class JobRepository:
             return existing, False
 
         new_model = self._to_model(job)
+        new_model.canonical_job_key = key
+        if source_name == "freehire":
+            new_model.last_verified_open_at = now
         new_model.first_seen_at = now
         new_model.last_seen_at = now
         self.session.add(new_model)

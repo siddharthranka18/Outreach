@@ -29,6 +29,7 @@ from startup_agent.discovery.himalayas import HimalayasDiscoverySource
 from startup_agent.discovery.remotive import RemotiveDiscoverySource
 from startup_agent.discovery.venomics import VenomicsDiscoverySource
 from startup_agent.discovery.reviewed_careers import ReviewedCareersDiscoverySource
+from startup_agent.discovery.freehire import FreehireDiscoverySource, verify_freehire_jobs
 from startup_agent.discovery.top_startups import TopStartupsDiscoverySource
 from startup_agent.discovery.wellfound import WellfoundDiscoverySource
 from startup_agent.discovery.y_combinator import YCombinatorDiscoverySource
@@ -166,6 +167,9 @@ class DiscoveryPipeline:
                     seed_state_path=self.settings.data_dir/'processed/yc_seed_checked_at.txt'))
             elif src.name in FEEDS:
                 adapters.append(RemoteFeedDiscoverySource(employers, src.name))
+            elif src.name == "freehire":
+                adapters.append(FreehireDiscoverySource(employers,
+                    self.settings.data_dir / "processed/freehire_facets.json", src.options))
             elif src.name == "hn_hiring":
                 adapters.append(HnHiringDiscoverySource(employers, leads_path=self.settings.data_dir / "processed/hn_contact_leads.json"))
             elif adapter_cls in (HimalayasDiscoverySource, RemotiveDiscoverySource):
@@ -580,6 +584,8 @@ class DiscoveryPipeline:
 
         for company in session.scalars(select(CompanyModel)):
             remember_boards(company, [company.careers_url or ""])
+        if any(source.name == "freehire" and source.enabled for source in self.settings.sources):
+            verify_freehire_jobs(session)
         logger.info("Freshness sweep closed %d unhandled jobs.", sweep_stale(session, self.successful_polls))
 
 

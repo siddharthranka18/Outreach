@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -176,6 +177,7 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
         logger.warning("Optional HN contact research file unavailable; continuing without hints.")
         hn_leads = []
     leads = {}
+    stored_companies = {}
     funding_evidence=dict(reviewed)
     for company in session.scalars(select(CompanyModel)):
         domain=employer_domain(company.website)
@@ -188,6 +190,7 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
     for company in session.scalars(select(CompanyModel).order_by(CompanyModel.id)):
         domain = employer_domain(company.website)
         if domain and not _is_indirect_company_url(company.website):
+            stored_companies[domain] = company
             leads[domain] = {
                 "company_name": company.company_name, "website": company.website,
                 "employee_count": company.employee_count, "careers_url": company.careers_url or company.website + "/careers",
@@ -250,6 +253,19 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
         cursor = int(json.loads(cursor_path.read_text(encoding="utf-8")).get("offset", 0))
     except (OSError, ValueError, AttributeError):
         cursor = 0
+    cached_candidates, research_queue = [], []
+    now = datetime.now(timezone.utc)
+    for domain, lead in eligible:
+        company = stored_companies.get(domain)
+        checked = company.last_researched_at if company else None
+        status = company.research_status if company else None
+        ttl = timedelta(days=21 if status in {"found_inbox", "no_inbox"} else 3)
+        if checked and now - checked.replace(tzinfo=timezone.utc) < ttl:
+            if status == "found_inbox" and company.research_contact:
+                cached_candidates.append(json.loads(company.research_contact))
+        else:
+            research_queue.append((domain, lead))
+    eligible = research_queue
     offset = cursor % len(eligible) if eligible else 0
     window = (eligible[offset:] + eligible[:offset])[:max(1,min(100,int(options.get("max_employers",80))))]
     cursor_path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,7 +295,13 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
             source_name=lead.get("source_name") or "hosted_careers",source_url=lead["source_url"],careers_url=careers_url))
         remember_boards(model,urls)
         current_jobs = board_jobs(urls, name, website, size, client, platforms)
+        if time.monotonic() >= deadline:
+            break
+        model.last_researched_at = datetime.now(timezone.utc)
+        model.research_contact = None
+        model.research_status = "no_inbox" if pages else "unreachable"
         if current_jobs is None:
+            model.research_status = "unreachable"
             continue
         if current_jobs:
             company = companies.upsert_company(Company(
@@ -295,9 +317,11 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
             context = junior_pitch_context(current,model,profile)
             if context: pitch_context = context
         if any(early_tech_role(job.job_title) and not junior_pitch_context(job,model,profile) for job in current_jobs):
+            model.research_status = "has_open_role"
             continue
         if not pitch_context and any(early_tech_role(node.get_text(" ", strip=True)) for _, contact_page in pages
                for node in contact_page.select("h2, h3, h4, a[href], button")):
+            model.research_status = "has_open_role"
             continue
         contact = verified_contact(pages, domain, lead.get("hiring_email", "").lower(),
             allow_generic=allow_generic, employee_count=size,
@@ -312,12 +336,15 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
             context = (context + " " + pitch_context)[:850]
         role = next((role for role, pattern in PROJECT_ROLES.items()
                      if re.search(pattern, context, re.I)), "full_stack")
-        candidates.append({
+        candidate = {
             "domain": domain, "name": name, "source": contact_source, "recipient": recipient,
             "context": context, "role": role,
-        })
+        }
+        candidates.append(candidate)
+        model.research_status = "found_inbox"
+        model.research_contact = json.dumps(candidate)
     cursor_path.write_text(json.dumps({"offset": offset + processed}), encoding="utf-8")
-    return candidates
+    return candidates + cached_candidates
 
 
 def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
@@ -398,10 +425,20 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
     history = hosted_request(endpoint, secret, "enquiry-history", [])["entries"]
     candidates = enquiry_candidates(session, settings, profile, history=history)
     routes = [route for route in build_outreach_routes(session, settings) if route.job_id is not None and route.url]
-    job_urls = dict(session.execute(select(JobModel.id, JobModel.normalized_job_url)).all())
+    job_urls = {}
+    aliases = {}
+    for job_id, url, key in session.execute(select(
+        JobModel.id, JobModel.normalized_job_url, JobModel.canonical_job_key,
+    )):
+        job_urls[job_id] = (url, key)
+        if key:
+            aliases.setdefault(key, []).append(url)
     cards = [
-        {"job_url": job_urls[route.job_id], "text": format_digest([route]).split("\n\n", 1)[1]}
+        {"job_url": url, "text": format_digest([route]).split("\n\n", 1)[1],
+         **({"canonical_job_key": key,
+             "alias_urls": [alias for alias in dict.fromkeys(aliases[key]) if alias != url][:5]} if key else {})}
         for route in routes
+        for url, key in (job_urls[route.job_id],)
     ]
     matching_companies = set()
     for company in session.scalars(select(CompanyModel).join(JobModel).where(
