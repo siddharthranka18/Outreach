@@ -1,8 +1,12 @@
 from unittest.mock import Mock
 
 import httpx
+import yaml
 
+from startup_agent.config.settings import Settings
+from startup_agent.database.repositories import CompanyRepository
 from startup_agent.discovery.curated_boards import CuratedStartupDiscoverySource
+from startup_agent.discovery.pipeline import DiscoveryPipeline
 
 
 def test_curated_boards_pause_provider_without_losing_independent_results(tmp_path):
@@ -34,3 +38,18 @@ def test_curated_boards_pause_provider_without_losing_independent_results(tmp_pa
     ]
     CuratedStartupDiscoverySource(evidence, state, http_client=client).discover()
     assert client.get.call_count == 2
+
+
+def test_cohort_without_headcount_is_stored_by_discovery_pipeline(db_session, tmp_path):
+    settings = Settings(base_dir=tmp_path)
+    settings.config_dir.mkdir()
+    evidence = {"cohort.example": {"company_name": "Cohort", "source_url": "https://fund.example/cohort",
+                                    "public_board_only": True}}
+    (settings.config_dir / "company_sizes.yaml").write_text(yaml.safe_dump(evidence))
+    client = Mock()
+    adapter = CuratedStartupDiscoverySource(evidence, settings.data_dir / "processed/cooldowns.json", client)
+    summary = DiscoveryPipeline(settings, session=db_session, custom_adapters=[adapter],
+                                auto_expand_ats=False).run()
+    assert summary.companies_inserted == 1
+    assert CompanyRepository(db_session).get_company_by_website("https://cohort.example").employee_count is None
+    client.get.assert_not_called()

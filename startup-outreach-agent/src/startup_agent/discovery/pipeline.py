@@ -267,7 +267,8 @@ class DiscoveryPipeline:
         except SQLAlchemyError:
             logger.warning("Stored employer evidence unavailable; using reviewed configuration.")
         employers.update({normalize_name(e["company_name"]): (domain, e)
-                          for domain, e in self.size_evidence.items() if e.get("company_name")})
+                          for domain, e in self.size_evidence.items()
+                          if e.get("company_name") and e.get("employee_count")})
         return employers
 
     def run(self) -> DiscoverySummary:
@@ -433,7 +434,7 @@ class DiscoveryPipeline:
             for company in unknown_companies:
                 domain = company.normalized_website.split("/", 1)[0]
                 evidence = self.size_evidence.get(domain)
-                if evidence:
+                if evidence and evidence.get("employee_count"):
                     company.employee_count = evidence["employee_count"]
                     continue
                 existing = repository.get_company_by_website(company.website)
