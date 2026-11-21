@@ -475,6 +475,8 @@ function publishHostedCards(batch) {
   });
   SpreadsheetApp.flush();
   let sent = 0;
+  let sentJobs = 0;
+  let sentEnquiries = 0;
   let resume;
   const seen = new Set();
   for (const card of batch.cards) {
@@ -510,6 +512,7 @@ function publishHostedCards(batch) {
       sheet.getRange(rowNumber, 6).setValue(batch.run_id);
       SpreadsheetApp.flush();
       sent++;
+      sentEnquiries++;
       continue;
     }
     const key = jobKey(matches[0]?.values[1] || card.job_url);
@@ -525,6 +528,15 @@ function publishHostedCards(batch) {
     sheet.getRange(rowNumber, 6).setValue(batch.run_id);
     SpreadsheetApp.flush();
     sent++;
+    sentJobs++;
+  }
+  if (sentEnquiries && !sentJobs && batch.cards.some(card => !card.draft)) {
+    telegram(config, 'sendMessage', {
+      chat_id: config.chatId,
+      text: `Digest delivery: ${sentJobs} direct application cards, ${sentEnquiries} enquiry review cards.\n` +
+        'Direct application listings were included in this run but none passed the saved-action checks for delivery. ' +
+        'Your Skip/Applied history remains excluded; enquiries still need your approval before email is sent.',
+    });
   }
   if (!sent && batch.summary) {
     const properties = PropertiesService.getScriptProperties();
