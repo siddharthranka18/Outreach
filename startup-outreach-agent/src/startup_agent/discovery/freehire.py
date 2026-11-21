@@ -15,6 +15,7 @@ from startup_agent.database.repositories import _is_indirect_company_url
 from startup_agent.database.models import JobModel
 from startup_agent.discovery.andhra_startup_map import _is_target_role
 from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
+from startup_agent.discovery.direct_ats import extract_ats_target
 from startup_agent.discovery.portfolio import india_location
 from startup_agent.discovery.remote_feeds import EARLY
 from startup_agent.models.company import Company
@@ -25,6 +26,7 @@ from startup_agent.utils.posting_guard import sanitize_untrusted_text
 
 ROOT = "https://freehire.me/api/v1"
 SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,199}")
+DOMAIN_NAME = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,24}", re.I)
 CATEGORIES = "software_engineering,backend,frontend,fullstack,mobile,devops,data_engineering,data_science,data_analytics,ml_ai,ai_engineering,qa"
 logger = logging.getLogger(__name__)
 
@@ -40,11 +42,13 @@ def https_url(value):
 
 
 class FreehireDiscoverySource(BaseDiscoverySource):
-    def __init__(self, employers, cache_path, options, http_client=None):
+    def __init__(self, employers, cache_path, options, http_client=None, *, known_boards=()):
         super().__init__(name="freehire", enabled=True)
         self.employers = employers
         self.cache_path = cache_path
         self.options = options
+        self.known_boards = {(board["platform"], board["board_token"]): board["website"]
+                             for board in known_boards}
         self.http_client = http_client or HttpClient(timeout=10, max_retries=2, public_only=True)
         self.fetched_count = 0
         self.rejections = Counter()
@@ -70,7 +74,7 @@ class FreehireDiscoverySource(BaseDiscoverySource):
         if not isinstance(facets, dict) or not facets:
             raise ValueError("Freehire returned no facet vocabulary.")
         domains = {domain: evidence for domain, evidence in self.employers.values()}
-        companies, jobs, resolved_companies = {}, {}, {}
+        companies, jobs, resolved_companies, unresolved = {}, {}, {}, {}
         lookups = max(0, min(12, int(self.options.get("company_lookups", 8))))
         limit = max(1, min(25, int(self.options.get("page_size", 25))))
         pages = max(1, min(2, int(self.options.get("max_pages_per_query", 2))))
@@ -116,6 +120,12 @@ class FreehireDiscoverySource(BaseDiscoverySource):
                     if isinstance(raw_website, str) and raw_website and "://" not in raw_website:
                         raw_website = "https://" + raw_website
                     website = https_url(raw_website)
+                    if not website:
+                        board = extract_ats_target(url, name, "")
+                        if board:
+                            website = self.known_boards.get((board["platform"], board["board_token"]), "")
+                    if not website and DOMAIN_NAME.fullmatch(name):
+                        website = "https://" + name.lower()
                     if not website and SLUG.fullmatch(company_slug):
                         if company_slug not in resolved_companies and lookups:
                             lookups -= 1
@@ -137,6 +147,7 @@ class FreehireDiscoverySource(BaseDiscoverySource):
                             website = https_url("https://" + known[0])
                     if not website or _is_indirect_company_url(website):
                         self.rejections["Unresolved employer domain"] += 1
+                        unresolved[slug] = {"company": name, "company_slug": company_slug, "url": url}
                         continue
                     domain = normalize_website(website).split("/", 1)[0]
                     evidence = domains.get(domain, {})
@@ -155,6 +166,8 @@ class FreehireDiscoverySource(BaseDiscoverySource):
                         description=description, source_job_id=slug, posted_at=posted)
                 if len(listings) < limit:
                     break
+        self.cache_path.with_name("freehire_unresolved_employers.json").write_text(
+            json.dumps(list(unresolved.values()), indent=2), encoding="utf-8")
         return DiscoveryResult(list(companies.values()), list(jobs.values()))
 
 

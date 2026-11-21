@@ -169,7 +169,8 @@ class DiscoveryPipeline:
                 adapters.append(RemoteFeedDiscoverySource(employers, src.name))
             elif src.name == "freehire":
                 adapters.append(FreehireDiscoverySource(employers,
-                    self.settings.data_dir / "processed/freehire_facets.json", src.options))
+                    self.settings.data_dir / "processed/freehire_facets.json", src.options,
+                    known_boards=self._stored_ats_targets()))
             elif src.name == "hn_hiring":
                 adapters.append(HnHiringDiscoverySource(employers, leads_path=self.settings.data_dir / "processed/hn_contact_leads.json"))
             elif adapter_cls in (HimalayasDiscoverySource, RemotiveDiscoverySource):

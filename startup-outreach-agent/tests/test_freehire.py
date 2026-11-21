@@ -18,7 +18,7 @@ def test_freehire_queries_and_reuses_only_verified_size(tmp_path):
     cache = tmp_path / "facets.json"
     cache.write_text(json.dumps(facets))
     job = {"title": "Software Engineering Intern", "company": "Studio",
-           "company_domain": "studio.example", "public_slug": "studio-swe-intern",
+           "public_slug": "studio-swe-intern",
            "countries": ["in"], "location": "Bengaluru",
            "url": "https://jobs.ashbyhq.com/studio/test", "description": "<p>Python APIs</p>"}
     client.get.side_effect = [
@@ -27,7 +27,9 @@ def test_freehire_queries_and_reuses_only_verified_size(tmp_path):
     ]
     source = FreehireDiscoverySource({"studio": ("studio.example", {
         "employee_count": "11-50", "source_url": "https://studio.example/about",
-    })}, cache, {}, client)
+    })}, cache, {}, client, known_boards=[
+        {"platform": "ashby", "board_token": "studio", "website": "https://studio.example"},
+    ])
     result = source.discover()
     assert source.fetched_count == 2
     assert len(result.jobs) == 1
