@@ -16,8 +16,46 @@ from startup_agent.discovery.direct_ats import DirectAtsDiscoverySource
 from startup_agent.funnel import source_funnel, format_funnel
 from startup_agent import main as cli
 from startup_agent.routing import build_outreach_routes
+from startup_agent.database.repositories import CompanyRepository, JobRepository
+from startup_agent.models.company import Company
+from startup_agent.models.job import Job
 
 F = Path(__file__).parent / "fixtures"
+
+
+def test_regular_digest_reviews_recent_internships_outside_startup_size(db_session, tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    from startup_agent.digest import format_digest
+
+    settings = Settings(base_dir=tmp_path)
+    cases = (
+        ("unknown", None, "India", "Software Engineer Intern", "open", 1),
+        ("midsize", "201-500", "Remote / Worldwide", "Backend Engineer Intern", "open", 1),
+        ("large", "501-1000", "India", "Software Engineer Intern", "open", 1),
+        ("foreign", None, "US only", "Software Engineer Intern", "open", 1),
+        ("junior", None, "India", "Junior Software Engineer", "open", 1),
+        ("handled", None, "India", "Software Engineer Intern", "applied", 1),
+        ("old", None, "India", "Software Engineer Intern", "open", 20),
+    )
+    for name, size, location, title, status, age in cases:
+        website = f"https://{name}.example"
+        company = CompanyRepository(db_session).upsert_company(Company(
+            company_name=name, website=website, employee_count=size,
+            source_name="fixture", source_url=website,
+        ))
+        JobRepository(db_session).upsert_job(Job(
+            job_title=title, job_url=website + "/jobs/software", company_id=company.id,
+            source_name="fixture", location=location, status=status,
+            posted_at=datetime.now(timezone.utc) - timedelta(days=age),
+            description="Work with the engineering team on Python and FastAPI services. Open to current undergraduate computer science students.",
+        ))
+    assert not build_outreach_routes(db_session, settings)
+    review = build_outreach_routes(db_session, settings, internship_review=True)
+    assert {route.company for route in review} == {"unknown", "midsize"}
+    assert all(route.action == "Review internship" for route in review)
+    digest = format_digest(review)
+    assert "Company size unlisted" in digest and "Company size: 201-500" in digest
 
 def test_all_new_sources_through_real_digest_preview(db_session, isolated_engine, tmp_path, monkeypatch):
     config = tmp_path / "config"

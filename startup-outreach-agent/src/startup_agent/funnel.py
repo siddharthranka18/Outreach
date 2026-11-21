@@ -19,10 +19,12 @@ def funnel_source(name):
     return name
 
 
-def source_funnel(session, settings):
+def source_funnel(session, settings, *, routes=None):
     ranker = OpportunityRanker(session=session, settings=settings)
     matches = {m.job_id: m for m in ranker.rank_opportunities(limit=1000000)}
-    routed = {r.job_id for r in build_outreach_routes(session, settings) if r.job_id}
+    if routes is None:
+        routes = build_outreach_routes(session, settings)
+    routed = {r.job_id for r in routes if r.job_id}
     counts, reasons = {}, Counter()
     for job, company in session.execute(select(JobModel, CompanyModel).join(CompanyModel)):
         row = counts.setdefault(funnel_source(job.source_name), dict(normalized=0, size_known=0, size_eligible=0,

@@ -1,6 +1,7 @@
 """Build reviewable outreach routes from stored matches and their source data."""
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import re
 from urllib.parse import urlsplit
 
@@ -15,6 +16,7 @@ from startup_agent.matching.ranker import OpportunityRanker
 from startup_agent.matching.startup_filter import StartupEligibilityStatus, StartupEligibilityFilter
 from startup_agent.matching.scorer import OpportunityScorer
 from startup_agent.matching.classifier import OpportunityType
+from startup_agent.matching.profile import CandidateProfile
 from startup_agent.utils.normalizers import normalize_job_url, normalize_website
 
 
@@ -41,6 +43,7 @@ class OutreachRoute:
     category: str = ""
     asks_for_internship: bool = False
     source_label: str = ""
+    review_note: str = ""
 
 
 def _public_link(value: str | None) -> str | None:
@@ -75,8 +78,16 @@ def junior_pitch_context(job, company, profile):
             "Do not claim to have graduated or to meet full-time availability.")
 
 
-def build_outreach_routes(session: Session, settings: Settings) -> list[OutreachRoute]:
-    ranker = OpportunityRanker(session=session, settings=settings)
+def build_outreach_routes(session: Session, settings: Settings, *, internship_review: bool = False) -> list[OutreachRoute]:
+    from startup_agent.discovery.portfolio import india_location
+
+    profile_path = settings.config_dir / "candidate_profile.yaml"
+    profile = CandidateProfile.load(profile_path if profile_path.is_file() else None)
+    normal_size = StartupEligibilityFilter(profile.preferences.small_startup_max_employees,
+                                          profile.preferences.allow_unknown_company_size)
+    review_size = StartupEligibilityFilter(max(500, normal_size.max_employees), allow_unknown=True)
+    ranker = OpportunityRanker(session=session, settings=settings, profile=profile,
+                               startup_filter=review_size if internship_review else normal_size)
     contacts_path = settings.config_dir / "hiring_contacts.yaml"
     reviewed_contacts = (
         yaml.safe_load(contacts_path.read_text(encoding="utf-8")) or {}
@@ -84,13 +95,31 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
     )
     jobs = {job.id: job for job in session.scalars(select(JobModel))}
     routes = []
+    review_routes = []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
     seen_urls = {
         job.normalized_job_url for job in jobs.values() if job.status in {"skipped", "applied"}
     }
+    handled_keys = {job.canonical_job_key for job in jobs.values()
+                    if job.canonical_job_key and job.status in {"skipped", "applied"}}
     for match in ranker.rank_opportunities(limit=len(jobs)):
         job = jobs.get(match.job_id)
         if not job or job.status != "open":
             continue
+        if job.canonical_job_key in handled_keys:
+            continue
+        review_note = ""
+        if normal_size.evaluate(job.company.employee_count).status != StartupEligibilityStatus.ELIGIBLE:
+            if not internship_review or match.opportunity_type not in {OpportunityType.INTERNSHIP, OpportunityType.COOP_STUDENT}:
+                continue
+            listed = job.posted_at or job.first_seen_at
+            if not listed or listed.replace(tzinfo=timezone.utc) < cutoff or not india_location(job.location):
+                continue
+            if not _public_link(job.job_url):
+                continue
+            size = review_size.evaluate(job.company.employee_count)
+            review_note = (f"Company size: {job.company.employee_count}" if size.estimated_max_employees is not None
+                           else "Company size unlisted")
         needs_location_review = (
             job.source_name == "venomics_careers"
             and match.eligibility_status == EligibilityStatus.POTENTIALLY_ELIGIBLE
@@ -107,7 +136,8 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
         key = normalize_job_url(url)
         if key in seen_urls:
             continue
-        seen_urls.add(key)
+        if not review_note:
+            seen_urls.add(key)
 
         # Accept only an explicitly published, employer-domain hiring inbox.
         domain = normalize_website(job.company.website).split("/", 1)[0]
@@ -125,16 +155,18 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
             source = _public_link(reviewed["source_url"])
             if source and email.rsplit("@", 1)[-1] == domain and normalize_website(source).split("/", 1)[0] == domain:
                 contact, contact_source = email, source
-        routes.append(OutreachRoute(
+        destination = review_routes if review_note else routes
+        destination.append(OutreachRoute(
             company=match.company_name, title=match.job_title, url=url, contact=contact,
             contact_source=contact_source,
-            action=("Confirm location" if needs_location_review else
+            action=("Review internship" if review_note else "Confirm location" if needs_location_review else
                     "Review email candidate" if contact else "Apply link"),
             location=match.location, match_score=match.match_score,
             job_id=job.id,
             relevant_projects=tuple(match.relevant_projects),
             matching_skills=tuple(match.matching_skills),
             category=match.category,
+            review_note=review_note,
             source_label={"remotive": "Remotive", "himalayas": "Himalayas", "remoteok": "Remote OK",
                           "jobicy": "Jobicy", "freehire": "Freehire", "working_nomads": "Working Nomads", "hn_hiring": "Hacker News Who is hiring",
                           "vc_peakxv": "Peak XV portfolio", "vc_lightspeed": "Lightspeed portfolio",
@@ -152,9 +184,22 @@ def build_outreach_routes(session: Session, settings: Settings) -> list[Outreach
     for company in session.scalars(select(CompanyModel).order_by(CompanyModel.company_name)):
         if any(job.status in {"open", "skipped", "applied"} for job in company.jobs):
             continue
-        if ranker.startup_filter.evaluate(company.employee_count).status != StartupEligibilityStatus.ELIGIBLE:
+        if normal_size.evaluate(company.employee_count).status != StartupEligibilityStatus.ELIGIBLE:
             continue
         url = _public_link(company.careers_url) or _public_link(company.website)
         routes.append(OutreachRoute(company=company.company_name, action="Watchlist", url=url))
 
+    seen_review_keys = {jobs[route.job_id].canonical_job_key for route in routes if route.job_id}
+    added = 0
+    for route in review_routes:
+        url = normalize_job_url(route.url)
+        key = jobs[route.job_id].canonical_job_key
+        if url in seen_urls or (key and key in seen_review_keys):
+            continue
+        routes.append(route)
+        seen_urls.add(url)
+        seen_review_keys.add(key)
+        added += 1
+        if added == 6:
+            break
     return routes

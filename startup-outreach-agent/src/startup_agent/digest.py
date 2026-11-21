@@ -10,10 +10,13 @@ def format_digest(routes: Iterable[OutreachRoute]) -> str:
     if not openings:
         return "Startup job digest\n\nNo eligible openings in the current shortlist."
 
-    review_count = sum(route.action == "Confirm location" for route in openings)
-    heading = f"Startup job digest · {len(openings) - review_count} eligible"
+    location_count = sum(route.action == "Confirm location" for route in openings)
+    review_count = sum(bool(route.review_note) for route in openings)
+    heading = f"Startup job digest · {len(openings) - location_count - review_count} eligible"
+    if location_count:
+        heading += f" · {location_count} needs location confirmation"
     if review_count:
-        heading += f" · {review_count} needs location confirmation"
+        heading += f" · {review_count} internships to review"
     entries = []
     for index, route in enumerate(openings, start=1):
         title = " ".join(route.title.split())
@@ -24,5 +27,6 @@ def format_digest(routes: Iterable[OutreachRoute]) -> str:
         if route.match_score is not None:
             location += f" · Match {route.match_score:g}/100"
         source = f"\nSource: {route.source_label}" if route.source_label else ""
-        entries.append(f"{index}. {title} @ {company}\n{location}\nApply: {route.url}{source}")
+        review = f"Internship to review · {route.review_note}\n" if route.review_note else ""
+        entries.append(f"{review}{index}. {title} @ {company}\n{location}\nApply: {route.url}{source}")
     return "\n\n".join([heading, *entries])

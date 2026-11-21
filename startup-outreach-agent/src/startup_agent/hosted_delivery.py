@@ -424,7 +424,8 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
     profile = CandidateProfile.load(settings.config_dir / "candidate_profile.yaml")
     history = hosted_request(endpoint, secret, "enquiry-history", [])["entries"]
     candidates = enquiry_candidates(session, settings, profile, history=history)
-    routes = [route for route in build_outreach_routes(session, settings) if route.job_id is not None and route.url]
+    routes = [route for route in build_outreach_routes(session, settings, internship_review=True)
+              if route.job_id is not None and route.url]
     job_urls = {}
     aliases = {}
     for job_id, url, key in session.execute(select(
@@ -433,13 +434,15 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
         job_urls[job_id] = (url, key)
         if key:
             aliases.setdefault(key, []).append(url)
-    cards = [
+    route_cards = [
         {"job_url": url, "text": format_digest([route]).split("\n\n", 1)[1],
          **({"canonical_job_key": key,
              "alias_urls": [alias for alias in dict.fromkeys(aliases[key]) if alias != url][:5]} if key else {})}
         for route in routes
         for url, key in (job_urls[route.job_id],)
     ]
+    cards = [card for route, card in zip(routes, route_cards) if not route.review_note]
+    review_cards = [card for route, card in zip(routes, route_cards) if route.review_note]
     matching_companies = set()
     for company in session.scalars(select(CompanyModel).join(JobModel).where(
         JobModel.id.in_([route.job_id for route in routes]),
@@ -449,10 +452,11 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
     enquiries = cold_enquiry_cards(candidates, profile, matching_companies, history,
                                  max_new_drafts=enquiry_options.get('max_new_drafts',15))
     # Leave room in the 30-card Telegram delivery limit for enquiries.
-    cards = (enquiries if enquiries_only else [*cards[:15], *enquiries[:15], *cards[15:]])[:100]
+    cards = (enquiries if enquiries_only else [*cards[:15], *enquiries[:15], *review_cards, *cards[15:]])[:100]
     logger.info("Prepared %d email enquiry card(s) for hosted review.", len(enquiries))
     logger.info("Prepared %d ranked application routes and %d total hosted cards.", len(routes), len(cards))
-    funnel = source_funnel(session, settings)
+    logger.info("Prepared %d internship review cards with wider company-size criteria.", len(review_cards))
+    funnel = source_funnel(session, settings, routes=routes)
     summary = format_funnel(funnel)
     logger.info("%s", summary)
     result = hosted_request(endpoint, secret, run_id, cards, summary=format_heartbeat(funnel))

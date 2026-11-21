@@ -320,8 +320,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.outreach or args.digest_preview or args.telegram_test or args.email_preview or args.email_llm_preview or args.email_save:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
             with session_factory() as session:
-                routes = build_outreach_routes(session, settings)
-                funnel = source_funnel(session, settings) if args.digest_preview else None
+                routes = build_outreach_routes(session, settings, internship_review=args.digest_preview)
+                funnel = source_funnel(session, settings, routes=routes) if args.digest_preview else None
             if args.email_preview or args.email_llm_preview or args.email_save:
                 openings = [route for route in routes if route.job_id is not None and route.action != "Confirm location"]
                 if not openings:

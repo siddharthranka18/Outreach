@@ -27,12 +27,13 @@ class OpportunityRanker:
         profile: Optional[CandidateProfile] = None,
         session: Optional[Session] = None,
         settings: Optional[Settings] = None,
+        startup_filter: Optional[StartupEligibilityFilter] = None,
     ) -> None:
         self.settings = settings or Settings.load()
         self.profile = profile or CandidateProfile.load()
         self.session = session
         self.scorer = OpportunityScorer(self.profile)
-        self.startup_filter = StartupEligibilityFilter(
+        self.startup_filter = startup_filter or StartupEligibilityFilter(
             max_employees=self.profile.preferences.small_startup_max_employees,
             allow_unknown=self.profile.preferences.allow_unknown_company_size,
         )
