@@ -1,0 +1,203 @@
+# Read-only snapshot from india_tech_ai_startups.xlsx / Sheet1. Team sizes are workbook estimates.
+- company: Ringg AI
+  employee_count: 11-50
+  funding_stage: Series A
+  context: Voice AI agents for enterprise calling
+  workbook_row: 39
+  domain: ringg.ai
+  recipient: hiring@ringg.ai
+  source: https://www.linkedin.com/posts/ringg_were-hiring-were-looking-for-builders-activity-7470096810758324224-B0aL
+- company: Vorflux
+  employee_count: 11-50
+  funding_stage: Undisclosed
+  context: New AI company from Rippling co-founder
+  workbook_row: 41
+- company: Flash.co
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI shopping assistant / commerce
+  workbook_row: 44
+  domain: flash.co
+- company: Simplismart
+  employee_count: 11-50
+  funding_stage: Series A
+  context: Fast inference & MLOps orchestration engine
+  workbook_row: 48
+  domain: simplismart.ai
+- company: Spheron Network
+  employee_count: 11-50
+  funding_stage: Series A
+  context: Decentralised GPU compute network (AI x Web3)
+  workbook_row: 50
+  domain: spheron.network
+- company: Bolna
+  employee_count: 11-50
+  funding_stage: Seed
+  context: Open-source voice-agent orchestration platform
+  workbook_row: 51
+  domain: bolna.ai
+- company: Fibr AI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI agents that personalise websites for marketers
+  workbook_row: 52
+  domain: fibr.ai
+- company: Navana.ai
+  employee_count: 11-50
+  funding_stage: Series A
+  context: Vernacular voice AI for Bharat users
+  workbook_row: 55
+  domain: navana.ai
+- company: CraftifAI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI copilots for embedded engineers
+  workbook_row: 57
+- company: RevRag.AI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI agents for BFSI sales & onboarding
+  workbook_row: 58
+  domain: revrag.ai
+- company: Jurisphere.ai
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI research & drafting for lawyers
+  workbook_row: 59
+  domain: jurisphere.ai
+- company: H2LooP
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI platform for embedded-systems engineering
+  workbook_row: 60
+  domain: h2loop.ai
+  recipient: careers@h2loop.ai
+  source: https://www.linkedin.com/posts/pulkit87_founding-engineer-ai-at-h2loop-bengaluru-activity-7381606430308704256-ehwV
+- company: Maya Research
+  employee_count: 11-50
+  funding_stage: Seed
+  context: Open voice-generation models
+  workbook_row: 61
+- company: Soket AI
+  employee_count: 11-50
+  funding_stage: Undisclosed
+  context: Sovereign multilingual LLMs (Project EKA)
+  workbook_row: 69
+  domain: soket.ai
+- company: Phot.ai
+  employee_count: 11-50
+  funding_stage: Seed
+  context: GenAI photo & design tools
+  workbook_row: 70
+  domain: phot.ai
+- company: HireBound
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI hiring platform
+  workbook_row: 71
+- company: Febi.ai
+  employee_count: 11-50
+  funding_stage: Pre-Series A
+  context: AI finance co-pilot for SMEs
+  workbook_row: 72
+  domain: febi.ai
+- company: Darwix AI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: GenAI sales-conversation intelligence
+  workbook_row: 73
+  domain: darwix.ai
+- company: Vibrium
+  employee_count: 11-50
+  funding_stage: Seed
+  context: Early-stage AI startup
+  workbook_row: 74
+- company: Dubverse
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI dubbing & voiceovers
+  workbook_row: 75
+  domain: dubverse.ai
+- company: ProactAI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: Vision foundation models for infrastructure
+  workbook_row: 76
+- company: Lemurian Labs
+  employee_count: 11-50
+  funding_stage: Series A
+  context: Software stack for efficient AI compute
+  workbook_row: 83
+  domain: lemurianlabs.com
+- company: Perceptyne
+  employee_count: 11-50
+  funding_stage: Seed
+  context: Humanoid / dexterous industrial robots
+  workbook_row: 87
+  domain: perceptyne.com
+- company: Grexa AI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI marketing agents for local businesses
+  workbook_row: 96
+  domain: grexa.ai
+- company: Fire AI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI analytics agents for businesses
+  workbook_row: 97
+- company: Alphadroid
+  employee_count: 11-50
+  funding_stage: Pre-Series A
+  context: Service robots with AI
+  workbook_row: 103
+- company: Consint
+  employee_count: 11-50
+  funding_stage: Series A
+  context: Defence & security AI
+  workbook_row: 104
+  domain: consint.ai
+- company: Constems-AI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI startup (seed 2026)
+  workbook_row: 105
+- company: LLUMO AI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: LLM evaluation & cost optimisation
+  workbook_row: 106
+  domain: llumo.ai
+- company: Rivvun AI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI startup (seed, 2026)
+  workbook_row: 114
+- company: RedBrick AI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: Medical-imaging annotation for AI
+  workbook_row: 115
+  domain: redbrickai.com
+- company: NudgeBee
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI agents for cloud operations / SRE
+  workbook_row: 116
+  domain: nudgebee.com
+- company: Companion Labs
+  employee_count: 11-50
+  funding_stage: Seed
+  context: Interactive consumer AI (Peak XV Surge)
+  workbook_row: 117
+- company: NYAI
+  employee_count: 11-50
+  funding_stage: Seed
+  context: AI company (seed 2026)
+  workbook_row: 118
+  domain: nyai.ai
+- company: CurvetAI
+  employee_count: 11-50
+  funding_stage: Pre-seed
+  context: Multi-model AI workspace with agents
+  workbook_row: 119

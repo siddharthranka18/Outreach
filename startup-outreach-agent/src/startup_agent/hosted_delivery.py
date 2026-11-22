@@ -348,6 +348,40 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
     return candidates + cached_candidates
 
 
+def spreadsheet_enquiry_candidates(session: Session, settings: Settings) -> list[dict]:
+    """Use spreadsheet estimates and explicitly reviewed recruiting addresses."""
+    path = settings.config_dir / "spreadsheet_enquiries.yaml"
+    if not path.is_file():
+        return []
+    rows = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    company_sizes = {
+        employer_domain(website): size
+        for website, size in session.execute(select(CompanyModel.website, CompanyModel.employee_count))
+        if size
+    }
+    sizes_path = settings.config_dir / "company_sizes.yaml"
+    reviewed = yaml.safe_load(sizes_path.read_text(encoding="utf-8")) or {} if sizes_path.is_file() else {}
+    size_filter = StartupEligibilityFilter(max_employees=199, allow_unknown=False)
+    candidates = {}
+    for row in rows:
+        domain = row.get("domain", "")
+        recipient = row.get("recipient", "").strip().lower()
+        source = row.get("source", "")
+        if not domain or not EMAIL.fullmatch(recipient) or recipient.rsplit("@", 1)[1] != domain:
+            continue
+        if not employer_domain(source) or _is_indirect_company_url(f"https://{domain}"):
+            continue
+        sizes = [row.get("employee_count"), company_sizes.get(domain), reviewed.get(domain, {}).get("employee_count")]
+        if not sizes[0] or any(size_filter.evaluate(size).status != StartupEligibilityStatus.ELIGIBLE
+                               for size in sizes if size):
+            continue
+        candidates[domain] = {
+            "name": row["company"], "domain": domain, "recipient": recipient, "source": source,
+            "context": row.get("context") or "",
+        }
+    return list(candidates.values())
+
+
 def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
                        companies_with_matches: set[str], history: list[dict], *, max_new_drafts=MAX_NEW_DRAFTS) -> list[dict]:
     saved = {entry["url"]: entry for entry in history}
@@ -357,6 +391,7 @@ def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
     }
     drafts_remaining = max(0,min(15,int(max_new_drafts))) if os.getenv("GEMINI_API_KEY", "").strip() else 0
     cards = []
+    queued_recipients = set()
     for lead in candidates:
         name, domain, recipient = (lead[key] for key in ("name", "domain", "recipient"))
         if not recipient or normalize_name(name) in companies_with_matches or domain in companies_with_matches:
@@ -367,7 +402,7 @@ def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
             continue
         text = f"Internship enquiry @ {name}"
         entry = saved.get(mail_url, {})
-        if recipient in blocked_recipients or entry.get("delivery") not in {None, "", "pending"}:
+        if recipient in blocked_recipients or recipient in queued_recipients or entry.get("delivery") not in {None, "", "pending"}:
             continue
         draft = entry.get("draft") or {}
         if draft.get("recipient") != recipient:
@@ -386,6 +421,7 @@ def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
             drafts_remaining -= 1
             draft = {"recipient": recipient, "subject": generated.subject, "body": generated.body}
         cards.append({"job_url": mail_url, "text": text, "draft": {**draft, "source_url": lead["source"]}})
+        queued_recipients.add(recipient)
     return cards
 
 
@@ -425,6 +461,10 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
     profile = CandidateProfile.load(settings.config_dir / "candidate_profile.yaml")
     history = hosted_request(endpoint, secret, "enquiry-history", [])["entries"]
     candidates = enquiry_candidates(session, settings, profile, history=history)
+    if not any(source.name == "enquiry_research" and not source.enabled for source in settings.sources):
+        spreadsheet = spreadsheet_enquiry_candidates(session, settings)
+        spreadsheet_domains = {lead["domain"] for lead in spreadsheet}
+        candidates = spreadsheet + [lead for lead in candidates if lead["domain"] not in spreadsheet_domains]
     routes = [route for route in build_outreach_routes(session, settings, internship_review=True)
               if route.job_id is not None and route.url]
     job_urls = {}
