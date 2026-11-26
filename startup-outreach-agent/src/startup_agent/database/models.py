@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -42,6 +43,8 @@ class CompanyModel(Base):
     last_researched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     research_status: Mapped[Optional[str]] = mapped_column(String(30))
     research_contact: Mapped[Optional[str]] = mapped_column(Text)
+    github_org_url: Mapped[Optional[str]] = mapped_column(Text)
+    top_technical_contact_json: Mapped[Optional[str]] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -149,4 +152,7 @@ class EmailDraftModel(Base):
     listing_url: Mapped[str] = mapped_column(String(1024), nullable=False)
     gmail_test_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
     gmail_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    outreach_mode: Mapped[Optional[str]] = mapped_column(Text, server_default="standard_enquiry")
+    attach_resume: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="1")
+    signal_json: Mapped[Optional[str]] = mapped_column(Text)
 

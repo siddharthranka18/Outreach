@@ -32,6 +32,7 @@ class Settings:
         default_factory=lambda: Path(__file__).resolve().parent.parent.parent.parent
     )
     sources: List[SourceConfig] = field(default_factory=list)
+    outreach_upgrades: dict = field(default_factory=dict)
 
     @property
     def config_dir(self) -> Path:
@@ -87,9 +88,11 @@ class Settings:
             sources_file = base_dir / "config" / "sources.yaml"
 
         sources: List[SourceConfig] = []
+        upgrades = {}
         if sources_file.exists():
             with open(sources_file, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
+                upgrades = data.get("outreach_upgrades") or {}
                 raw_sources = data.get("sources", [])
                 for item in raw_sources:
                     sources.append(
@@ -110,5 +113,6 @@ class Settings:
             database_url=database_url,
             base_dir=base_dir,
             sources=sources,
+            outreach_upgrades=upgrades,
         )
 

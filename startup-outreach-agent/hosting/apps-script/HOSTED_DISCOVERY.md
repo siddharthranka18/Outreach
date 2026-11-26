@@ -23,3 +23,10 @@ The schedule runs daily at **9:15 AM and 6:15 PM IST**. GitHub can delay schedul
 Cold enquiries use reviewed entries in `config/hiring_contacts.yaml` with `accepts_enquiries: true`. The daily run checks that the employer still publishes the email, the employer fits the size limit, and there is no matching opening in that run. The bot stores the draft in the private Sheet and shows **Edit**, **Approve & Send**, and **Skip**. Reply to the edit prompt with the subject first and the body below it. **Approve & Send** sends the reviewed draft with the private Drive resume. An existing send or uncertain delivery to the same inbox prevents another cold enquiry.
 
 After replacing the script, update the existing web app deployment to a new version. Keep the existing `pollHostedReview` trigger. Old local job and email buttons require the local listener, so use only new hosted cards while the hosted trigger is active.
+## Optional high-reply outreach
+
+The VM sends the third card stream only when the deployed web app advertises support. To enable it, paste the current `Code.gs` into the existing Apps Script project, save, then run `installOutreachUpgrades` as the Gmail account that owns the web app. Review and grant Gmail access, then update the **existing deployment** to a new version so the `/exec` URL and Telegram webhook continue to work. The installer registers a daily follow-up check during the 11 AM IST window. The next hosted digest syncs the follow-up policy from `config/sources.yaml`.
+
+Existing enquiries use MailApp and the Drive PDF path. New cards display their mode and **No PDF**. The daily checker queues follow-up approvals for new tracked threads only, and approval repeats the recipient and reply checks before sending. Follow-up buttons never send unless explicitly approved in the configured private Telegram chat. If delivery is uncertain, check Gmail Sent before taking further action.
+
+Set `outreach_upgrades.enabled` to `false` in the VM config to stop drafting upgrades and syncing an enabled follow-up policy. Run `disableOutreachUpgrades` in Apps Script to pause existing upgrade approvals and follow-ups immediately.

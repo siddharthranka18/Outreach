@@ -34,6 +34,7 @@ from startup_agent.routing import HIRING_INBOX, OutreachRoute, build_outreach_ro
 from startup_agent.utils.http_client import HttpClient
 from startup_agent.utils.normalizers import normalize_name
 from startup_agent.routing import junior_pitch_context
+from startup_agent.outreach_upgrades import followup_policy, upgrade_cards
 
 logger = logging.getLogger(__name__)
 EMAIL = re.compile(r"[a-z0-9._+%-]+@[a-z0-9.-]+\.[a-z]{2,}")
@@ -152,7 +153,8 @@ def board_jobs(urls: list[str], name: str, website: str, size: str, client: Http
     return jobs
 
 
-def enquiry_candidates(session: Session, settings: Settings, profile: CandidateProfile, history=None) -> list[dict]:
+def enquiry_candidates(session: Session, settings: Settings, profile: CandidateProfile, history=None,
+                       *, upgrades_ready=False) -> list[dict]:
     if any(s.name == "enquiry_research" and not s.enabled for s in settings.sources):
         return []
     size_filter = StartupEligibilityFilter(max_employees=profile.preferences.small_startup_max_employees)
@@ -164,6 +166,14 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
     options = next((s.options for s in settings.sources if s.name == "enquiry_research"), {})
     deadline=time.monotonic()+max(30,min(900,int(options.get('max_seconds',900))))
     client.deadline=deadline
+    technical_research = None
+    upgrade_options = settings.outreach_upgrades
+    micro_options = upgrade_options.get("micro_audit_enrichment", {})
+    if upgrades_ready and upgrade_options.get("enabled") and micro_options.get("enabled"):
+        from startup_agent.discovery.technical_signals import TechnicalSignalResearch
+
+        technical_research = TechnicalSignalResearch(micro_options)
+        technical_research.client.deadline = deadline
     allow_generic = options.get("allow_generic_small_inboxes") is True
     platforms = {"greenhouse", "ashby", "lever", "recruitee"} | {
         s.name.removeprefix("ats_") for s in settings.sources if s.type == "ats_platform" and s.enabled}
@@ -240,7 +250,9 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
     ]
     handled={entry.get('url') for entry in history or [] if entry.get('status') in {'skipped','applied'}
              or entry.get('delivery') in {'sent','sending','uncertain'}}
-    eligible=[(domain,lead) for domain,lead in eligible if not any(
+    soft_entry_domains = {employer_domain(entry["url"]) for entry in history or []
+                          if upgrades_ready and entry.get("soft_entry_eligible") is True}
+    eligible=[(domain,lead) for domain,lead in eligible if domain in soft_entry_domains or not any(
         f'https://{domain}/#outreach-enquiry'+suffix in handled for suffix in ('','-form'))]
     pitch_contexts = {}
     for job in session.scalars(select(JobModel).where(JobModel.status == "open")):
@@ -341,6 +353,15 @@ def enquiry_candidates(session: Session, settings: Settings, profile: CandidateP
             "domain": domain, "name": name, "source": contact_source, "recipient": recipient,
             "context": context, "role": role,
         }
+        if technical_research:
+            org, technical, alternate = technical_research.inspect(pages, domain)
+            if org:
+                model.github_org_url = org
+            if alternate:
+                model.top_technical_contact_json = json.dumps(alternate)
+                candidate["technical_contact"] = alternate
+            if technical:
+                candidate["technical_signal"] = technical
         candidates.append(candidate)
         model.research_status = "found_inbox"
         model.research_contact = json.dumps(candidate)
@@ -387,7 +408,7 @@ def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
     saved = {entry["url"]: entry for entry in history}
     blocked_recipients = {
         (entry.get("draft") or {}).get("recipient") for entry in history
-        if entry.get("delivery") in {"sent", "sending", "uncertain"}
+        if entry.get("delivery") in {"sent", "sending", "uncertain", "replied"}
     }
     drafts_remaining = max(0,min(15,int(max_new_drafts))) if os.getenv("GEMINI_API_KEY", "").strip() else 0
     cards = []
@@ -402,7 +423,9 @@ def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
             continue
         text = f"Internship enquiry @ {name}"
         entry = saved.get(mail_url, {})
-        if recipient in blocked_recipients or recipient in queued_recipients or entry.get("delivery") not in {None, "", "pending"}:
+        if (recipient in blocked_recipients or recipient in queued_recipients
+                or entry.get("delivery") not in {None, "", "pending"}
+                or (entry.get("draft") or {}).get("outreach_mode") in {"micro_audit", "shadow_intern", "technical_question"}):
             continue
         draft = entry.get("draft") or {}
         if draft.get("recipient") != recipient:
@@ -425,10 +448,40 @@ def cold_enquiry_cards(candidates: list[dict], profile: CandidateProfile,
     return cards
 
 
-def hosted_request(endpoint: str, secret: str, run_id: str, cards: list[dict], *, summary=None) -> dict:
+def preview_outreach_streams(session: Session, settings: Settings, routes) -> str:
+    options = settings.outreach_upgrades
+    if not options.get("enabled"):
+        return ""
+    profile_path = settings.config_dir / "candidate_profile.yaml"
+    profile = CandidateProfile.load(profile_path if profile_path.is_file() else None)
+    job_ids = {route.job_id for route in routes if route.job_id}
+    companies = session.scalars(select(CompanyModel).join(JobModel).where(JobModel.id.in_(job_ids)))
+    matches = {value for company in companies for value in (company.normalized_name, employer_domain(company.website))}
+    leads = {lead["domain"]: lead for lead in spreadsheet_enquiry_candidates(session, settings)}
+    for (cached,) in session.execute(select(CompanyModel.research_contact).where(CompanyModel.research_contact.is_not(None))):
+        try:
+            lead = json.loads(cached)
+            leads.setdefault(lead["domain"], lead)
+        except (ValueError, KeyError, TypeError):
+            continue
+    candidates = [lead for lead in leads.values()
+                  if lead.get("recipient") and lead["domain"] not in matches and normalize_name(lead["name"]) not in matches]
+    standard = [{"job_url": f"https://{lead['domain']}/#outreach-enquiry",
+                 "draft": {"recipient": lead["recipient"]}} for lead in candidates[:MAX_NEW_DRAFTS]]
+    upgrades = upgrade_cards(session, settings, profile, candidates, matches, [], standard, preview=True)
+    lines = [f"Job applications: {len(job_ids)}", f"Standard enquiries from saved contacts: {len(standard)}",
+             f"High-reply draft candidates from stored evidence: {len(upgrades)}",
+             *(card["text"] for card in upgrades),
+             "Preview only. Gmail thread history, recipient approvals, and live research are checked at delivery."]
+    return "\n".join(lines)
+
+
+def hosted_request(endpoint: str, secret: str, run_id: str, cards: list[dict], *, summary=None, outreach_policy=None) -> dict:
     batch = {"timestamp": int(time.time()), "run_id": run_id, "cards": cards}
     if summary is not None:
         batch["summary"] = summary[:3500]
+    if outreach_policy is not None:
+        batch["outreach_policy"] = outreach_policy
     payload = json.dumps(batch, ensure_ascii=True)
     signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
     try:
@@ -459,8 +512,10 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
         return 0
 
     profile = CandidateProfile.load(settings.config_dir / "candidate_profile.yaml")
-    history = hosted_request(endpoint, secret, "enquiry-history", [])["entries"]
-    candidates = enquiry_candidates(session, settings, profile, history=history)
+    history_response = hosted_request(endpoint, secret, "enquiry-history", [])
+    history = history_response["entries"]
+    upgrades_ready = history_response.get("outreach_upgrades_ready") is True
+    candidates = enquiry_candidates(session, settings, profile, history=history, upgrades_ready=upgrades_ready)
     if not any(source.name == "enquiry_research" and not source.enabled for source in settings.sources):
         spreadsheet = spreadsheet_enquiry_candidates(session, settings)
         spreadsheet_domains = {lead["domain"] for lead in spreadsheet}
@@ -494,13 +549,18 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
                                  max_new_drafts=enquiry_options.get('max_new_drafts',15))
     # Leave room in the 30-card Telegram delivery limit for enquiries.
     cards = (enquiries if enquiries_only else [*cards[:15], *enquiries[:15], *review_cards, *cards[15:]])[:100]
+    upgrades = upgrade_cards(session, settings, profile, candidates, matching_companies, history, enquiries) if upgrades_ready else []
+    cards = [*cards[:100-len(upgrades)], *upgrades]
+    if upgrades_ready:
+        logger.info("Prepared %d high-reply outreach review cards.", len(upgrades))
     logger.info("Prepared %d email enquiry card(s) for hosted review.", len(enquiries))
     logger.info("Prepared %d ranked application routes and %d total hosted cards.", len(routes), len(cards))
     logger.info("Prepared %d internship review cards with wider company-size criteria.", len(review_cards))
     funnel = source_funnel(session, settings, routes=routes)
     summary = format_funnel(funnel)
     logger.info("%s", summary)
-    result = hosted_request(endpoint, secret, run_id, cards, summary=format_heartbeat(funnel))
+    kwargs = {"outreach_policy": followup_policy(settings.outreach_upgrades)} if upgrades_ready else {}
+    result = hosted_request(endpoint, secret, run_id, cards, summary=format_heartbeat(funnel), **kwargs)
     if type(result.get("sent")) is not int:
         raise RuntimeError("Apps Script did not confirm the Telegram delivery count.")
     logger.info("Hosted review accepted %d cards and delivered %d after saved-action checks.", len(cards), result["sent"])

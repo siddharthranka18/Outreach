@@ -1,4 +1,28 @@
 version: "1.0"
+outreach_upgrades:
+  enabled: true
+  max_drafts_per_run: 5
+  shadow_intern_from_senior_jd:
+    enabled: true
+    max_company_employees: 50
+    max_drafts_per_run: 3
+  micro_audit_enrichment:
+    enabled: true
+    github_api_timeout_seconds: 10
+    max_repos_per_company: 3
+    max_companies_per_run: 5
+  permission_hook_no_attachment:
+    enabled: true
+    apply_to_modes: [micro_audit, shadow_intern, technical_question]
+  threaded_followups:
+    enabled: true
+    followup_1_days: 5
+    followup_2_days: 12
+    max_followups_per_thread: 2
+  technical_question_fallback:
+    enabled: true
+    trigger_after_days_no_reply: 12
+
 sources:
   - name: curated_startup_boards
     display_name: Reviewed startup portfolio boards

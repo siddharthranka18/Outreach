@@ -13,7 +13,7 @@ from startup_agent.database.models import EmailDraftModel
 from startup_agent.database.session import create_session_factory
 from startup_agent.digest import format_digest
 from startup_agent.hosted_state import export_hosted_state
-from startup_agent.hosted_delivery import publish_hosted_shortlist
+from startup_agent.hosted_delivery import preview_outreach_streams, publish_hosted_shortlist
 from startup_agent.discovery.funding_leads import print_funding_leads
 from startup_agent.email_drafts import EmailDraft, format_email_draft, generate_email_draft, generate_llm_email_draft
 from startup_agent.discovery.pipeline import DiscoverySummary, run_discovery_pipeline
@@ -322,6 +322,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             with session_factory() as session:
                 routes = build_outreach_routes(session, settings, internship_review=args.digest_preview)
                 funnel = source_funnel(session, settings, routes=routes) if args.digest_preview else None
+                outreach_preview = preview_outreach_streams(session, settings, routes) if args.digest_preview else ""
             if args.email_preview or args.email_llm_preview or args.email_save:
                 openings = [route for route in routes if route.job_id is not None and route.action != "Confirm location"]
                 if not openings:
@@ -365,6 +366,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             if args.digest_preview:
                 print(format_funnel(funnel))
                 print(format_digest(routes))
+                if outreach_preview:
+                    print(f"\n{outreach_preview}")
                 return 0
             for route in routes:
                 label = f"{route.title} @ {route.company}" if route.title else route.company

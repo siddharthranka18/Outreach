@@ -4,6 +4,10 @@ const TEST_KEY = 'HOSTED_TEST';
 const OFFSET_KEY = 'HOSTED_TEST_OFFSET';
 const WEBHOOK_KEY = 'OUTREACH_TELEGRAM_WEBHOOK_SECRET';
 const WEBHOOK_UPDATE_KEY = 'OUTREACH_TELEGRAM_LAST_UPDATE';
+const UPGRADE_READY = 'OUTREACH_UPGRADES_READY_V1';
+const FOLLOWUP_POLICY = 'OUTREACH_FOLLOWUP_POLICY_V1';
+const UPGRADE_LABELS = {shadow_intern: 'Shadow Intern', micro_audit: 'Micro-Audit', technical_question: 'Tech Question'};
+const TRACK = {mode: 8, thread: 9, sentAt: 10, count: 11, state: 12, soft: 13};
 
 function settings() {
   const properties = PropertiesService.getScriptProperties();
@@ -133,10 +137,12 @@ function pollTelegram(reviewEnabled) {
 function handleTelegramUpdate(config, update, reviewEnabled, acknowledged = false) {
   const callback = update.callback_query;
   const data = callback?.data || '';
-  if (data.startsWith('hosted-test:') || (reviewEnabled && /^hosted-(job|mail):/.test(data))) {
+  if (data.startsWith('hosted-test:') || (reviewEnabled && /^hosted-(job|mail|bump):/.test(data))) {
     let feedback;
     try {
-      if (data.startsWith('hosted-mail:')) {
+      if (data.startsWith('hosted-bump:')) {
+        feedback = handleFollowupAction(config, callback);
+      } else if (data.startsWith('hosted-mail:')) {
         feedback = handleHostedMail(config, callback);
       } else {
         feedback = data.startsWith('hosted-job:')
@@ -157,7 +163,7 @@ function handleTelegramUpdate(config, update, reviewEnabled, acknowledged = fals
       }
     }
   } else if (reviewEnabled && update.message) {
-    handleHostedMailEdit(config, update.message);
+    if (!handleFollowupEdit(config, update.message)) handleHostedMailEdit(config, update.message);
   }
 }
 
@@ -358,19 +364,32 @@ function validHostedDraft(draft) {
     typeof draft.subject === 'string' && draft.subject.length > 0 && draft.subject.length <= 150 &&
     !/[\r\n]/.test(draft.subject) && typeof draft.body === 'string' &&
     draft.body.trim().length > 0 && draft.body.length <= 3000 &&
-    typeof draft.source_url === 'string' && /^https:\/\/\S+$/.test(draft.source_url);
+    typeof draft.source_url === 'string' && /^https:\/\/\S+$/.test(draft.source_url) &&
+    (draft.outreach_mode === undefined || draft.outreach_mode === 'standard_enquiry' ||
+      Object.hasOwn(UPGRADE_LABELS, draft.outreach_mode)) &&
+    (draft.attach_resume === undefined || typeof draft.attach_resume === 'boolean') &&
+    ((draft.attach_resume === false) === isUpgradeDraft(draft));
+}
+
+function isUpgradeDraft(draft) {
+  return Object.hasOwn(UPGRADE_LABELS, draft?.outreach_mode);
 }
 
 function mailVersion(draft, resume) {
+  if (draft.attach_resume === false) return jobKey(JSON.stringify([draft, 'no-pdf'])).slice(0, 16);
   return jobKey(JSON.stringify([draft, resume.hash, resume.blob.getName()])).slice(0, 16);
 }
 
 function sendHostedMailCard(config, url, draft, resume) {
   const key = jobKey(url);
   const version = mailVersion(draft, resume);
+  const headline = isUpgradeDraft(draft) ? `[${UPGRADE_LABELS[draft.outreach_mode]} • No PDF]` : 'Cold internship enquiry';
+  const attachment = resume ? `\nAttachment: ${resume.blob.getName()}` : '';
+  const technical = /^https:\/\/\S+$/.test(draft.context_signals?.url || '')
+    ? `\nTechnical source: ${draft.context_signals.url}` : '';
   telegram(config, 'sendMessage', {
     chat_id: config.chatId,
-    text: `Cold internship enquiry\nTo: ${draft.recipient}\nSubject: ${draft.subject}\nAttachment: ${resume.blob.getName()}\nHiring contact: ${draft.source_url}\n\n${draft.body}`,
+    text: `${headline}\nTo: ${draft.recipient}\nSubject: ${draft.subject}${attachment}\nHiring contact: ${draft.source_url}${technical}\n\n${draft.body}`,
     link_preview_options: {is_disabled: true},
     reply_markup: {inline_keyboard: [[
       {text: 'Edit', callback_data: `hosted-mail:e:${key}:${version}`},
@@ -388,11 +407,14 @@ function currentHostedMail(config, key, version) {
   if (row[2] !== 'open' || row[3] !== 'pending') throw new Error('This draft is no longer pending. Check Gmail Sent.');
   const draft = JSON.parse(row[4]);
   if (!validHostedDraft(draft)) throw new Error('This draft is invalid.');
-  if (rows.some(other => ['sent', 'sending', 'uncertain'].includes(other[3]) &&
+  if (rows.some(other => ['sent', 'sending', 'uncertain', 'replied'].includes(other[3]) &&
       other[4] && JSON.parse(other[4]).recipient === draft.recipient)) {
     throw new Error('This inbox already has an outreach attempt. Check Gmail Sent.');
   }
-  const resume = resumeAttachment(config.fileId);
+  if (isUpgradeDraft(draft) && config.properties.getProperty(UPGRADE_READY) !== '1') {
+    throw new Error('Outreach upgrades are disabled.');
+  }
+  const resume = draft.attach_resume === false ? null : resumeAttachment(config.fileId);
   if (mailVersion(draft, resume) !== version) throw new Error('The draft or resume changed. Use the latest card.');
   return {sheet, number: index + 2, url: row[1], draft, resume};
 }
@@ -423,10 +445,19 @@ function handleHostedMail(config, callback) {
   status.setValue('sending');
   SpreadsheetApp.flush();
   try {
-    MailApp.sendEmail({
-      to: pending.draft.recipient, subject: pending.draft.subject, body: pending.draft.body,
-      attachments: [pending.resume.blob],
-    });
+    if (pending.draft.attach_resume === false) {
+      const message = GmailApp.createDraft(pending.draft.recipient, pending.draft.subject, pending.draft.body).send();
+      ensureTrackingColumns(pending.sheet);
+      pending.sheet.getRange(pending.number, TRACK.mode, 1, 6).setValues([[
+        pending.draft.outreach_mode, message.getThread().getId(), new Date().toISOString(),
+        0, JSON.stringify({anchor: message.getId()}), false,
+      ]]);
+    } else {
+      MailApp.sendEmail({
+        to: pending.draft.recipient, subject: pending.draft.subject, body: pending.draft.body,
+        attachments: [pending.resume.blob],
+      });
+    }
   } catch (_) {
     status.setValue('uncertain');
     SpreadsheetApp.flush();
@@ -457,6 +488,221 @@ function handleHostedMailEdit(config, message) {
   }
 }
 
+function ensureTrackingColumns(sheet) {
+  const missing = TRACK.soft - sheet.getMaxColumns();
+  if (missing > 0) sheet.insertColumnsAfter(sheet.getMaxColumns(), missing);
+  sheet.getRange(1, TRACK.mode, 1, 6).setValues([[
+    'outreach_mode', 'gmail_thread_id', 'sent_at_iso', 'followup_count',
+    'followup_state_json', 'soft_entry_eligible',
+  ]]);
+}
+
+function validFollowupPolicy(policy) {
+  return Boolean(policy && typeof policy.enabled === 'boolean' && typeof policy.soft_entry === 'boolean' &&
+    Number.isInteger(policy.first_days) && policy.first_days >= 1 && policy.first_days <= 365 &&
+    Number.isInteger(policy.second_days) && policy.second_days > policy.first_days && policy.second_days <= 366 &&
+    Number.isInteger(policy.max_followups) && policy.max_followups >= 0 && policy.max_followups <= 2);
+}
+
+function currentFollowupPolicy(config) {
+  if (config.properties.getProperty(UPGRADE_READY) !== '1') return null;
+  const policy = JSON.parse(config.properties.getProperty(FOLLOWUP_POLICY) || 'null');
+  return validFollowupPolicy(policy) && policy.enabled ? policy : null;
+}
+
+function installOutreachUpgrades() {
+  const config = settings();
+  GmailApp.getAliases(); // Request Gmail authorization before advertising support to the VM.
+  const {sheet} = hostedHistory();
+  ensureTrackingColumns(sheet);
+  if (!ScriptApp.getProjectTriggers().some(trigger => trigger.getHandlerFunction() === 'checkAndQueueFollowUps')) {
+    ScriptApp.newTrigger('checkAndQueueFollowUps').timeBased()
+      .everyDays(1).atHour(11).inTimezone('Asia/Kolkata').create();
+  }
+  config.properties.setProperty(UPGRADE_READY, '1');
+}
+
+function disableOutreachUpgrades() {
+  settings().properties.deleteProperty(UPGRADE_READY);
+}
+
+function followupState(sheet, number, state) {
+  sheet.getRange(number, TRACK.state).setValue(JSON.stringify(state));
+  SpreadsheetApp.flush();
+}
+
+function inspectFollowupThread(sheet, number, row, state) {
+  const thread = state.anchor ? GmailApp.getMessageById(state.anchor)?.getThread()
+    : GmailApp.getThreadById(row[TRACK.thread - 1]);
+  if (!thread) return null;
+  thread.refresh();
+  const messages = thread.getMessages().filter(message => !message.isDraft());
+  const expected = 1 + Number(row[TRACK.count - 1] || 0);
+  if (!messages.length || messages.length < expected || (state.anchor && messages[0].getId() !== state.anchor)) return null;
+  if (messages.length > expected) {
+    if (messages.slice(expected).some(message => message.getFrom() !== messages[0].getFrom())) {
+      sheet.getRange(number, 4).setValue('replied');
+    }
+    sheet.getRange(number, TRACK.soft).setValue(false);
+    followupState(sheet, number, {...state, status: 'stopped'});
+    return null;
+  }
+  return messages[messages.length - 1];
+}
+
+function sendFollowupCard(config, row, state, day) {
+  const draft = JSON.parse(row[4]);
+  const key = jobKey(row[1]);
+  const token = jobKey(JSON.stringify([state.number, state.body])).slice(0, 16);
+  telegram(config, 'sendMessage', {
+    chat_id: config.chatId,
+    text: `[Follow-Up #${state.number} • Day ${day}]\nTo: ${draft.recipient}\nThread: ${draft.subject}\n\n${state.body}`,
+    link_preview_options: {is_disabled: true},
+    reply_markup: {inline_keyboard: [[
+      {text: 'Approve & Reply in Thread', callback_data: `hosted-bump:s:${key}:${token}`},
+      {text: 'Edit', callback_data: `hosted-bump:e:${key}:${token}`},
+      {text: 'Skip', callback_data: `hosted-bump:k:${key}:${token}`},
+    ]]},
+  });
+}
+
+function checkAndQueueFollowUps() {
+  const config = settings();
+  const policy = currentFollowupPolicy(config);
+  if (!policy || !policy.max_followups) return 0;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return 0;
+  try {
+    const {sheet, rows} = hostedHistory();
+    let sent = 0, checked = 0;
+    const start = Number(config.properties.getProperty('OUTREACH_FOLLOWUP_CURSOR') || 0) % (rows.length || 1);
+    let visited = 0;
+    for (const row of [...rows.slice(start), ...rows.slice(0, start)]) {
+      if (checked >= 30 || sent >= 8) break;
+      const number = ((start + visited++) % rows.length) + 2;
+      if (row[3] !== 'sent' || !row[TRACK.thread - 1] || !row[TRACK.sentAt - 1] ||
+          !['shadow_intern', 'micro_audit'].includes(row[TRACK.mode - 1])) continue;
+      try {
+        const count = Number(row[TRACK.count - 1] || 0);
+        const state = JSON.parse(row[TRACK.state - 1] || '{}');
+        if (['sending', 'uncertain', 'stopped'].includes(state.status)) continue;
+        const elapsed = (Date.now() - Date.parse(row[TRACK.sentAt - 1])) / 86400000;
+        const day = count === 0 ? policy.first_days : policy.second_days;
+        if (!Number.isFinite(elapsed) || elapsed < day) continue;
+        if (count >= policy.max_followups && (count !== 2 || !policy.soft_entry)) continue;
+        checked++;
+        if (!inspectFollowupThread(sheet, number, row, state)) continue;
+        if (count === 2) {
+          sheet.getRange(number, TRACK.soft).setValue(true);
+          continue;
+        }
+        if (state.status === 'pending' || (state.lastSent && Date.now() - Date.parse(state.lastSent) < 2 * 86400000)) continue;
+        const body = count === 0
+          ? 'Just checking back on my note. Would it be helpful if I took a small test task or wrote a short example for your team?'
+          : 'I wanted to check once more in case a small software task would be useful. Happy to share a brief example if the timing works.';
+        const pending = {...state, status: 'pending', number: count + 1, body};
+        sendFollowupCard(config, row, pending, day);
+        followupState(sheet, number, pending);
+        sent++;
+      } catch (_) {
+        console.warn('Could not check one outreach thread.');
+      }
+    }
+    config.properties.setProperty('OUTREACH_FOLLOWUP_CURSOR', String((start + visited) % (rows.length || 1)));
+    return sent;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function currentFollowup(config, key, version) {
+  const policy = currentFollowupPolicy(config);
+  if (!policy) throw new Error('Threaded follow-ups are disabled.');
+  const {sheet, rows} = hostedHistory();
+  const index = rows.findIndex(row => row[1] && jobKey(row[1]) === key);
+  const row = rows[index];
+  if (!row || row[3] !== 'sent' || !row[TRACK.thread - 1]) throw new Error('This thread is no longer pending.');
+  const state = JSON.parse(row[TRACK.state - 1] || '{}');
+  if (state.status !== 'pending' || state.number !== Number(row[TRACK.count - 1] || 0) + 1 ||
+      state.number > policy.max_followups || jobKey(JSON.stringify([state.number, state.body])).slice(0, 16) !== version) {
+    throw new Error('This follow-up is no longer current.');
+  }
+  return {sheet, row, state, number: index + 2, day: state.number === 1 ? policy.first_days : policy.second_days};
+}
+
+function handleFollowupAction(config, callback) {
+  const chat = callback.message?.chat;
+  if (chat?.type !== 'private' || String(chat.id) !== config.chatId ||
+      String(callback.from?.id) !== config.chatId) return null;
+  const action = /^hosted-bump:([sek]):([a-f0-9]{24}):([a-f0-9]{16})$/.exec(callback.data);
+  if (!action) return 'Invalid follow-up action.';
+  const [, mode, key, version] = action;
+  let current;
+  try {
+    current = currentFollowup(config, key, version);
+  } catch (error) {
+    return error.message;
+  }
+  const {sheet, row, state, number} = current;
+  if (mode === 'k') {
+    sheet.getRange(number, TRACK.soft).setValue(false);
+    followupState(sheet, number, {...state, status: 'stopped'});
+    return 'Follow-ups skipped for this thread.';
+  }
+  if (mode === 'e') {
+    telegram(config, 'sendMessage', {
+      chat_id: config.chatId,
+      text: `Edit follow-up ${key}:${version}\nReply with the updated body.`,
+      reply_markup: {force_reply: true, input_field_placeholder: 'Follow-up body'},
+    });
+    return 'Reply to the edit prompt.';
+  }
+  const last = inspectFollowupThread(sheet, number, row, state);
+  if (!last) return 'The thread changed, so the follow-up was stopped.';
+  const recipient = JSON.parse(row[4]).recipient.toLowerCase();
+  // Reply-all includes the original recipient of our outbound message. Verify the
+  // generated recipients before sending so a self-reply cannot be recorded as a bump.
+  const reply = last.createDraftReplyAll(state.body);
+  const replyMessage = reply.getMessage();
+  const addresses = [replyMessage.getTo(), replyMessage.getCc(), replyMessage.getBcc()]
+    .join(',').toLowerCase().match(/[a-z0-9._+%-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || [];
+  const sender = last.getFrom().toLowerCase().match(/[a-z0-9._+%-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || [];
+  if (!addresses.includes(recipient) || addresses.some(address => address !== recipient && !sender.includes(address)) ||
+      !inspectFollowupThread(sheet, number, row, state)) {
+    reply.deleteDraft();
+    return 'The thread or recipients changed. No follow-up was sent.';
+  }
+  followupState(sheet, number, {...state, status: 'sending'});
+  try {
+    reply.send();
+    sheet.getRange(number, TRACK.count).setValue(state.number);
+    followupState(sheet, number, {anchor: state.anchor, lastSent: new Date().toISOString()});
+    return 'Gmail accepted the reply in the original thread.';
+  } catch (_) {
+    followupState(sheet, number, {...state, status: 'uncertain'});
+    return 'Follow-up delivery is uncertain. Check Gmail Sent.';
+  }
+}
+
+function handleFollowupEdit(config, message) {
+  const marker = /^Edit follow-up ([a-f0-9]{24}):([a-f0-9]{16})$/.exec(
+    (message.reply_to_message?.text || '').split('\n')[0]);
+  if (!marker) return false;
+  if (message.chat?.type !== 'private' || String(message.chat.id) !== config.chatId ||
+      String(message.from?.id) !== config.chatId || !message.reply_to_message?.from?.is_bot) return true;
+  try {
+    const {sheet, number, row, state, day} = currentFollowup(config, marker[1], marker[2]);
+    const body = (message.text || '').trim();
+    if (!body || body.length > 3000) throw new Error('Reply with a body up to 3,000 characters.');
+    const updated = {...state, body};
+    followupState(sheet, number, updated);
+    sendFollowupCard(config, row, updated, day);
+  } catch (error) {
+    telegram(config, 'sendMessage', {chat_id: config.chatId, text: error.message});
+  }
+  return true;
+}
+
 function publishHostedCards(batch) {
   const config = settings();
   const {sheet, rows} = hostedHistory();
@@ -465,8 +711,12 @@ function publishHostedCards(batch) {
   const byUrl = new Map();
   const byKey = new Map();
   const activeEnquiries = new Set(batch.cards.filter(card => card.draft).map(card => card.job_url));
+  const upgradesReady = config.properties?.getProperty(UPGRADE_READY) === '1';
+  if (upgradesReady && validFollowupPolicy(batch.outreach_policy)) {
+    config.properties.setProperty(FOLLOWUP_POLICY, JSON.stringify(batch.outreach_policy));
+  }
   rows.forEach((row, index) => {
-    if (row[1]?.endsWith('/#outreach-enquiry') && row[3] === 'pending' &&
+    if (/\/#outreach-enquiry(?:-technical)?$/.test(row[1] || '') && row[3] === 'pending' &&
         (row[2] === 'open' || row[2] === 'paused')) {
       const nextStatus = activeEnquiries.has(row[1]) ? 'open' : 'paused';
       if (row[2] !== nextStatus) {
@@ -486,9 +736,12 @@ function publishHostedCards(batch) {
   let sent = 0;
   let sentJobs = 0;
   let sentEnquiries = 0;
+  let sentUpgrades = 0;
   let resume;
   const seen = new Set();
   for (const card of batch.cards) {
+    const upgrade = isUpgradeDraft(card.draft);
+    if (upgrade ? (!upgradesReady || sentUpgrades >= 5) : sent - sentUpgrades >= 30) continue;
     const identity = hostedJobIdentity(card.job_url);
     const keyIdentity = card.canonical_job_key && `canonical:${card.canonical_job_key}`;
     if (seen.has(identity) || (keyIdentity && seen.has(keyIdentity))) continue;
@@ -500,10 +753,9 @@ function publishHostedCards(batch) {
         String(row.values[5]) === batch.run_id)) continue;
     if (card.draft && (
       matches.some(row => row.values[3] && row.values[3] !== 'pending') ||
-      rows.some(row => ['sent', 'sending', 'uncertain'].includes(row[3]) &&
+      rows.some(row => ['sent', 'sending', 'uncertain', 'replied'].includes(row[3]) &&
         row[4] && JSON.parse(row[4]).recipient === card.draft.recipient)
     )) continue;
-    if (sent >= 30) break;
     let rowNumber = matches[0]?.number;
     if (!rowNumber) {
       sheet.appendRow(['', card.job_url, 'open', card.draft ? 'pending' : '',
@@ -512,19 +764,20 @@ function publishHostedCards(batch) {
     }
     if (sent) Utilities.sleep(1100);
     if (card.draft) {
-      resume = resume || resumeAttachment(config.fileId);
       const saved = matches[0]?.values[4] ? JSON.parse(matches[0].values[4]) : null;
       const draft = saved?.recipient === card.draft.recipient ? {...saved, source_url: card.draft.source_url} : card.draft;
       if (!validHostedDraft(draft)) continue;
+      if (draft.attach_resume !== false) resume = resume || resumeAttachment(config.fileId);
       if (saved && JSON.stringify(saved) !== JSON.stringify(draft)) {
         sheet.getRange(rowNumber, 5).setValue(JSON.stringify(draft));
         SpreadsheetApp.flush();
       }
-      sendHostedMailCard(config, card.job_url, draft, resume);
+      sendHostedMailCard(config, card.job_url, draft, draft.attach_resume === false ? null : resume);
       sheet.getRange(rowNumber, 6).setValue(batch.run_id);
       SpreadsheetApp.flush();
       sent++;
       sentEnquiries++;
+      if (upgrade) sentUpgrades++;
       continue;
     }
     const key = jobKey(matches[0]?.values[1] || card.job_url);
@@ -579,11 +832,14 @@ function doPost(event) {
       if (batch.run_id === 'enquiry-history') {
         const {rows} = hostedHistory();
         const entries = rows.filter(row => typeof row[1] === 'string' &&
-          /\/#outreach-enquiry(?:-form)?$/.test(row[1])).map(row => ({
+          /\/#outreach-enquiry(?:-form|-technical)?$/.test(row[1])).map(row => ({
           url: row[1], status: row[2], delivery: row[3],
           draft: row[4] ? JSON.parse(row[4]) : null,
+          sent_at_iso: row[TRACK.sentAt - 1] || '',
+          soft_entry_eligible: row[TRACK.soft - 1] === true,
         }));
-        result = {ok: true, entries};
+        result = {ok: true, entries,
+          outreach_upgrades_ready: PropertiesService.getScriptProperties().getProperty(UPGRADE_READY) === '1'};
       } else {
         result = {ok: true, sent: publishHostedCards(batch)};
       }
