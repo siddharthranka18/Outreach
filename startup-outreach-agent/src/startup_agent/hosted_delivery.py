@@ -536,8 +536,9 @@ def publish_hosted_shortlist(session: Session, settings: Settings, *, enquiries_
     history_response = hosted_request(endpoint, secret, "enquiry-history", [])
     history = history_response["entries"]
     upgrades_ready = history_response.get("outreach_upgrades_ready") is True
+    # Contact research precedes ranking, liveness checks and draft generation.
     candidates = enquiry_candidates(session, settings, profile, history=history, upgrades_ready=upgrades_ready,
-                                    deadline=deadline - 265 if deadline else None)
+                                    deadline=deadline - 345 if deadline else None)
     if not any(source.name == "enquiry_research" and not source.enabled for source in settings.sources):
         spreadsheet = spreadsheet_enquiry_candidates(session, settings)
         spreadsheet_domains = {lead["domain"] for lead in spreadsheet}

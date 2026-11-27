@@ -294,8 +294,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             summary = run_discovery_pipeline(settings=settings, deadline=deadline - 440 if deadline else None)
             print_discovery_report(summary)
             session_factory = create_session_factory(create_db_engine(settings.database_url))
-            with session_factory() as session:
-                print(format_funnel(source_funnel(session, settings)))
+            # Hosted delivery calculates the funnel from its final shortlist.
+            # Avoid ranking the stored inventory again before contact research.
+            if not args.hosted_daily:
+                with session_factory() as session:
+                    print(format_funnel(source_funnel(session, settings)))
 
             if summary.all_failed:
                 print("ERROR: All attempted discovery sources failed.", file=sys.stderr)
