@@ -22,6 +22,44 @@ EARLY = re.compile(r"\b(?:intern(?:ship)?|junior|entry[- ]level|new[- ]grad|fres
 logger = logging.getLogger(__name__)
 
 
+def wwr_programming_entries(content):
+    """Yield RSS postings with evidence they are open to applicants in India."""
+    feed = BeautifulSoup(content, "xml")
+    if not feed.find("rss"):
+        raise ValueError("Expected We Work Remotely RSS.")
+    for item in feed.find_all("item"):
+        title, link = item.find("title"), item.find("link")
+        if title is None or link is None:
+            continue
+        url = link.get_text(" ", strip=True)
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or parsed.hostname not in {"weworkremotely.com", "www.weworkremotely.com"}:
+            continue
+        company, _, role = title.get_text(" ", strip=True).partition(":")
+        description = item.find("description")
+        description_html = description.get_text() if description else ""
+        region = " / ".join(node.get_text(" ", strip=True) for node in item.find_all(["region", "country"]))
+        labels = [label.strip() for label in re.split(r"[/,;|]", region) if label.strip()]
+        exclusion = r"\b(?:except|excluding|outside|not including|restricted to|only)\b"
+        if re.search(r"\b(?:except|excluding|outside|not including)\s+India\b", region, re.I):
+            location = ""
+        elif any(re.fullmatch(r"India", label, re.I) for label in labels):
+            location = "India"
+        elif not re.search(exclusion, region, re.I) and any(
+            re.fullmatch(r"Worldwide|Anywhere in the World|Global Remote", label, re.I) for label in labels
+        ):
+            location = "Worldwide"
+        elif not region:
+            plain = BeautifulSoup(description_html, "html.parser").get_text(" ", strip=True)
+            location = "Worldwide" if re.search(
+                r"\b(?:region|location|remote)\s*:\s*Anywhere in the World\b(?!\s*[,(-]?\s*(?:except|excluding))",
+                plain, re.I,
+            ) else ""
+        else:
+            location = ""
+        yield company.strip(), role.strip(), url, description_html, location
+
+
 class RemoteFeedDiscoverySource(BaseDiscoverySource):
     def __init__(self, employers, name, enabled=True, http_client=None):
         super().__init__(name=name, enabled=enabled)

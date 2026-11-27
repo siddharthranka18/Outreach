@@ -28,5 +28,6 @@ def format_digest(routes: Iterable[OutreachRoute]) -> str:
             location += f" · Match {route.match_score:g}/100"
         source = f"\nSource: {route.source_label}" if route.source_label else ""
         review = f"Internship to review · {route.review_note}\n" if route.review_note else ""
-        entries.append(f"{review}{index}. {title} @ {company}\n{location}\nApply: {route.url}{source}")
+        warning = f"\n{route.trust_warning}" if route.trust_warning else ""
+        entries.append(f"{review}{index}. {title} @ {company}\n{location}{warning}\nApply: {route.url}{source}")
     return "\n\n".join([heading, *entries])

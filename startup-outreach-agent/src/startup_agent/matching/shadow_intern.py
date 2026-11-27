@@ -23,7 +23,7 @@ RESTRICTED = re.compile(
 )
 
 
-def shadow_intern_signals(session, profile, options):
+def shadow_intern_signals(session, profile, options, *, settings=None):
     from startup_agent.discovery.portfolio import india_location
     from startup_agent.routing import HIRING_INBOX
 
@@ -36,6 +36,12 @@ def shadow_intern_signals(session, profile, options):
     profile_stack = scorer._extract_job_skills(" ".join(profile.all_skills))
     signals = {}
     for job, company in jobs:
+        if settings and (
+            (settings.career_ops("api_liveness_check") and job.liveness_status == "expired")
+            or (settings.career_ops("simhash_repost_detection") and job.is_ghost_job)
+            or (settings.career_ops("title_miss_rescue") and job.rescued_by_content)
+        ):
+            continue
         if size_filter.evaluate(company.employee_count).status != StartupEligibilityStatus.ELIGIBLE:
             continue
         domain = normalize_website(company.website).split("/", 1)[0]

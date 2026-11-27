@@ -184,6 +184,53 @@ class JobClassifier:
         matches = sum(1 for pat in swe_indicators if re.search(pat, desc_lower))
         return matches >= 2
 
+    def rescue_by_content(self, title, description, experience_level, employment_type,
+                          verified_skills, min_indicators):
+        """Classify explicit early-career roles whose title missed the normal checks."""
+        opportunity = self.determine_opportunity_type(title, employment_type, experience_level, description)
+        category = self.classify_category(title, description)
+        early = {OpportunityType.INTERNSHIP, OpportunityType.COOP_STUDENT, OpportunityType.GRADUATE_ENTRY_LEVEL}
+        if (opportunity == OpportunityType.SENIOR_STAFF or self.is_unrelated(title)
+                or self.is_ambiguous_engineering(title) or (opportunity in early and category != JobCategory.UNRELATED)):
+            return None
+        if len(verified_skills) < min_indicators:
+            return None
+        content = re.sub(r"\b(?:prior|past|previous|completed)\s+internship(?: experience)?\b"
+                         r"|\binternship experience\b", "", description or "", flags=re.I)
+        if re.search(
+            r"\b(?:[5-9]|\d{2,})\s*\+?\s*(?:years?|yrs?)\b"
+            r"|\b(?:must be|seeking|looking for|as a)\s+(?:an?\s+)?(?:senior|lead|staff|principal)\b"
+            r"|\b(?:senior|lead|staff|principal)\s+(?:level|position|role)\b",
+            f"{content} {experience_level or ''}", re.I,
+        ):
+            return None
+        student = re.search(r"\b(?:intern(?:ship)?|undergrad(?:uate)?s?|students?)\b", content, re.I)
+        entry = re.search(r"\b(?:0\s*[-–]\s*1\s*(?:years?|yrs?)|0\s+to\s+1\s+years?|fresher|entry[- ]level)\b", content, re.I)
+        if not student and not entry:
+            return None
+        if opportunity not in early:
+            explicit_intern = student and re.search(r"\bintern(?:ship)?\b", student[0], re.I)
+            opportunity = (
+                OpportunityType.INTERNSHIP if explicit_intern else
+                OpportunityType.GRADUATE_ENTRY_LEVEL if entry or "full" in (employment_type or "").casefold()
+                else OpportunityType.COOP_STUDENT
+            )
+        family = title + " " + content
+        if category == JobCategory.UNRELATED or category == JobCategory.SOFTWARE_DEV:
+            for pattern, label in (
+                (r"\b(?:ai|machine learning|llms?|rag)\b", "AI"),
+                (r"\b(?:data engineering|data pipelines?|etl)\b", "Data Engineer"),
+                (r"\b(?:full[- ]?stack)\b", "Full Stack"),
+                (r"\b(?:backend|back[- ]end|fastapi|rest apis?)\b", "Backend"),
+                (r"\b(?:frontend|front[- ]end|react)\b", "Frontend"),
+            ):
+                if re.search(pattern, family, re.I):
+                    return opportunity, self.classify(f"{label} Intern") if opportunity != OpportunityType.GRADUATE_ENTRY_LEVEL else self.classify_category(f"{label} Engineer")
+            category = JobCategory.SOFTWARE_DEV
+        if opportunity in {OpportunityType.INTERNSHIP, OpportunityType.COOP_STUDENT}:
+            category = self.classify(f"{category} Intern")
+        return opportunity, category
+
     def determine_opportunity_type(
         self,
         title: str,

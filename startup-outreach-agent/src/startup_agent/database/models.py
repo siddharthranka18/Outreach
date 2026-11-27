@@ -112,6 +112,14 @@ class JobModel(Base):
     missing_ats_polls: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     canonical_job_key: Mapped[Optional[str]] = mapped_column(String(24), index=True)
     last_verified_open_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    description_simhash: Mapped[Optional[str]] = mapped_column(Text, index=True)
+    repost_count: Mapped[Optional[int]] = mapped_column(Integer, server_default="0")
+    is_ghost_job: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="0")
+    trust_score: Mapped[Optional[int]] = mapped_column(Integer)
+    trust_flags_json: Mapped[Optional[str]] = mapped_column(Text)
+    liveness_status: Mapped[Optional[str]] = mapped_column(Text, server_default="active")
+    last_liveness_check_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    rescued_by_content: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -138,6 +146,34 @@ class JobModel(Base):
             f"<JobModel(id={self.id}, title='{self.job_title}', "
             f"company_id={self.company_id}, status='{self.status}')>"
         )
+
+
+class JobRelistModel(Base):
+    """Record distinct repost identities and the first day each was observed."""
+
+    __tablename__ = "job_relists"
+
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True)
+    identity: Mapped[str] = mapped_column(Text, primary_key=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AtsBoardModel(Base):
+    """An imported public board or an observed board with polling history."""
+
+    __tablename__ = "ats_boards"
+
+    platform: Mapped[str] = mapped_column(Text, primary_key=True)
+    board_token: Mapped[str] = mapped_column(Text, primary_key=True)
+    company_name: Mapped[Optional[str]] = mapped_column(Text)
+    website: Mapped[Optional[str]] = mapped_column(Text)
+    source_url: Mapped[Optional[str]] = mapped_column(Text)
+    size_status: Mapped[Optional[str]] = mapped_column(Text)
+    consecutive_failures: Mapped[Optional[int]] = mapped_column(Integer, server_default="0")
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    board_status: Mapped[Optional[str]] = mapped_column(Text, server_default="active")
+    last_new_job_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    posting_keys_json: Mapped[Optional[str]] = mapped_column(Text)
 
 
 class EmailDraftModel(Base):

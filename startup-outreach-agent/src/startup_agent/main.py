@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import sys
+import time
 from typing import List, Optional
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -89,6 +90,8 @@ def print_discovery_report(summary: DiscoverySummary) -> None:
     print(f"   - Existing Updated    : {summary.jobs_updated}")
     print(f" ATS Boards Expanded     : {summary.ats_boards_expanded}")
     print(f" ATS Jobs Enriched       : {summary.ats_jobs_enriched}")
+    if summary.ats_boards_paused:
+        print(f" ATS Boards Paused       : {summary.ats_boards_paused}")
     print("=" * 65 + "\n")
 
 
@@ -264,8 +267,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             session_factory = create_session_factory(create_db_engine(settings.database_url))
 
             def post_shortlist() -> None:
-                with session_factory() as session:
-                    routes = build_outreach_routes(session, settings)
+                with session_factory.begin() as session:
+                    routes = build_outreach_routes(session, settings, check_liveness=True)
                 count = send_job_cards(routes)
                 print(f"Telegram confirmed {count} review card(s).", flush=True)
 
@@ -287,7 +290,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if args.discover or args.telegram_daily or args.hosted_daily:
             print("\n>>> Launching multi-source discovery pipeline...")
-            summary = run_discovery_pipeline(settings=settings)
+            deadline = time.monotonic() + 1130 if args.hosted_daily and settings.career_ops_upgrades.get("enabled") else None
+            summary = run_discovery_pipeline(settings=settings, deadline=deadline - 440 if deadline else None)
             print_discovery_report(summary)
             session_factory = create_session_factory(create_db_engine(settings.database_url))
             with session_factory() as session:
@@ -301,11 +305,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 return 1
             if args.telegram_daily or args.hosted_daily:
                 session_factory = create_session_factory(create_db_engine(settings.database_url))
-                with session_factory() as session:
+                with session_factory.begin() as session:
                     if args.hosted_daily:
-                        count = publish_hosted_shortlist(session, settings, enquiries_only=args.hosted_enquiries_only)
+                        count = publish_hosted_shortlist(session, settings, enquiries_only=args.hosted_enquiries_only,
+                                                        deadline=deadline)
                     else:
-                        count = send_job_cards(build_outreach_routes(session, settings))
+                        count = send_job_cards(build_outreach_routes(session, settings, check_liveness=True))
                 print(f"Telegram confirmed {count} review card(s).")
             return 0
 
@@ -336,7 +341,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     with session_factory() as session:
                         saved = session.get(EmailDraftModel, route.job_id)
                     if saved is None:
-                        draft = generate_email_draft(route, profile)
+                        draft = generate_email_draft(route, profile, settings=settings)
                         try:
                             with session_factory.begin() as session:
                                 saved = EmailDraftModel(
@@ -355,7 +360,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         print(f"\nRecipient source: {route.contact_source}")
                     return 0
                 print(f"{mode} email draft preview for {route.title} @ {route.company}\n", flush=True)
-                print(draft_writer(route, profile))
+                print(draft_writer(route, profile, settings=settings) if args.email_llm_preview else draft_writer(route, profile))
                 if route.contact_source:
                     print(f"\nRecipient source: {route.contact_source}")
                 return 0

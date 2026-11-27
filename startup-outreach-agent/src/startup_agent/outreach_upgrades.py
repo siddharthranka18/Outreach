@@ -3,9 +3,10 @@
 from datetime import datetime, timedelta, timezone
 import logging
 import os
+import time
 from urllib.parse import urlsplit
 
-from startup_agent.email_drafts import generate_email_draft
+from startup_agent.email_drafts import DraftFactError, generate_email_draft
 from startup_agent.matching.shadow_intern import shadow_intern_signals
 from startup_agent.routing import OutreachRoute
 from startup_agent.utils.normalizers import normalize_name
@@ -27,7 +28,8 @@ def _fallback_due(entry, options):
         return False
 
 
-def upgrade_cards(session, settings, profile, candidates, matches, history, standard_cards, *, preview=False):
+def upgrade_cards(session, settings, profile, candidates, matches, history, standard_cards, *,
+                  preview=False, deadline=None):
     options = settings.outreach_upgrades
     if not options.get("enabled"):
         return []
@@ -35,7 +37,7 @@ def upgrade_cards(session, settings, profile, candidates, matches, history, stan
     micro_options = options.get("micro_audit_enrichment", {})
     hook = options.get("permission_hook_no_attachment", {})
     fallback = options.get("technical_question_fallback", {})
-    shadow = shadow_intern_signals(session, profile, shadow_options) if shadow_options.get("enabled") else {}
+    shadow = shadow_intern_signals(session, profile, shadow_options, settings=settings) if shadow_options.get("enabled") else {}
     known_domains = {lead["domain"] for lead in candidates}
     candidates = [*candidates, *(
         {"name": company, "domain": domain, "recipient": inbox, "source": signal["url"]}
@@ -103,14 +105,18 @@ def upgrade_cards(session, settings, profile, candidates, matches, history, stan
                 if mode == "shadow_intern":
                     shadow_budget -= 1
                 continue
-            if not os.getenv("GEMINI_API_KEY", "").strip():
-                break
+            if not os.getenv("GEMINI_API_KEY", "").strip() or (deadline and time.monotonic() >= deadline):
+                continue
             route = OutreachRoute(name, "Review outreach", signal.get("senior_role_title", ""),
                                   url=source, contact=recipient,
                                   matching_skills=tuple(signal.get("detected_stack", []) or [signal.get("language", "")]))
             try:
                 draft = generate_email_draft(route, profile, outreach_mode=mode, signals=signal,
-                    permission_hook=hook.get("enabled") is True and mode in hook.get("apply_to_modes", []))
+                    permission_hook=hook.get("enabled") is True and mode in hook.get("apply_to_modes", []),
+                    settings=settings, deadline=deadline)
+            except DraftFactError as error:
+                logger.warning("Skipped a technical draft after fact checking: %s", error)
+                continue
             except (ValueError, RuntimeError) as error:
                 logger.warning("Outreach upgrade drafting paused: %s", error)
                 break

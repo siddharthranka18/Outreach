@@ -44,7 +44,7 @@ from startup_agent.matching.startup_filter import (
 )
 from startup_agent.utils.http_client import HttpClient
 from startup_agent.funnel import funnel_source
-from startup_agent.discovery.board_tracking import remember_boards, stored_targets, sweep_stale
+from startup_agent.discovery.board_tracking import BoardHealth, remember_boards, stored_targets, sweep_stale
 from startup_agent.discovery.community_feeds import CommunityFeedSource
 from startup_agent.discovery.india_boards import IndiaBoardSource
 from startup_agent.discovery.structured_jobs import StructuredBoardSource
@@ -84,6 +84,7 @@ class DiscoverySummary:
     jobs_updated: int = 0
     ats_boards_expanded: int = 0
     ats_jobs_enriched: int = 0
+    ats_boards_paused: int = 0
     duration_seconds: float = 0.0
 
     @property
@@ -114,9 +115,12 @@ class DiscoveryPipeline:
         self.custom_adapters = custom_adapters
         self.ats_http_client = ats_http_client
         self.successful_polls = []
+        self.board_health = None
         self.ats_deadline = time.monotonic()+600
         flags = {s.name.removeprefix("ats_"): s.enabled for s in self.settings.sources if s.type == "ats_platform"}
         self.ats_platforms = {"greenhouse", "ashby", "lever", "recruitee"} | {name for name, enabled in flags.items() if enabled}
+        if not self.settings.career_ops_upgrades.get("enabled"):
+            self.ats_platforms.discard("workday")
         if not flags:  # Preserve programmatic configurations predating platform flags.
             self.ats_platforms |= {"workable", "breezy", "teamtailor", "bamboohr"}
         self.auto_expand_ats = auto_expand_ats
@@ -239,11 +243,21 @@ class DiscoveryPipeline:
         return sorted(adapters,key=priority)
 
     def _stored_ats_targets(self):
+        def collect(session):
+            targets = {(item["platform"], item["board_token"]): item
+                       for item in stored_targets(session, self.ats_platforms)}
+            if self.settings.career_ops_upgrades.get("enabled"):
+                from startup_agent.discovery.career_ops_importer import registry_targets
+
+                for target in registry_targets(session, self.size_evidence, self.ats_platforms):
+                    targets.setdefault((target["platform"], target["board_token"]), target)
+            return list(targets.values())
+
         if self.session is not None:
-            return stored_targets(self.session, self.ats_platforms)
+            return collect(self.session)
         factory = create_session_factory(create_db_engine(self.settings.database_url))
         with factory() as session:
-            return stored_targets(session, self.ats_platforms)
+            return collect(session)
 
     def _known_employers(self):
         """Reuse persisted portfolio evidence on later runs without auto-editing reviewed YAML."""
@@ -271,10 +285,19 @@ class DiscoveryPipeline:
                           if e.get("company_name") and e.get("employee_count")})
         return employers
 
-    def run(self) -> DiscoverySummary:
+    def run(self, *, deadline: float | None = None) -> DiscoverySummary:
         """Execute the discovery pipeline across all resolved sources."""
         start_time = time.time()
         summary = DiscoverySummary()
+        self.successful_polls.clear()
+        health_options = self.settings.career_ops("dead_board_health")
+        if health_options:
+            if self.session is not None:
+                self.board_health = BoardHealth(self.session, health_options)
+            else:
+                factory = create_session_factory(create_db_engine(self.settings.database_url))
+                with factory() as lookup_session:
+                    self.board_health = BoardHealth(lookup_session, health_options)
         self._backfill_reviewed_sizes()
         adapters = self._resolve_adapters()
 
@@ -287,7 +310,7 @@ class DiscoveryPipeline:
         source_counts = {}
 
         # 1. Source Discovery Phase with Source-Level Isolation
-        discovery_deadline=time.monotonic()+900
+        discovery_deadline = min(deadline or float("inf"), time.monotonic() + 900)
         for adapter in adapters:
             summary.sources_attempted += 1
             logger.info("Starting discovery for source: '%s'...", adapter.name)
@@ -299,6 +322,8 @@ class DiscoveryPipeline:
             if isinstance(getattr(adapter,'http_client',None),HttpClient):
                 source_seconds=120 if isinstance(adapter,PortfolioDiscoverySource) else 240 if isinstance(adapter,YCombinatorDiscoverySource) else 600
                 adapter.http_client.deadline=min(discovery_deadline,time.monotonic()+source_seconds)
+            if isinstance(adapter, DirectAtsDiscoverySource):
+                adapter.board_health = self.board_health
             try:
                 raw_result = adapter.discover()
                 self.successful_polls.extend(getattr(adapter, "successful_polls", []))
@@ -346,9 +371,9 @@ class DiscoveryPipeline:
 
         # 2. Expand public ATS boards exposed by confirmed small-startup job URLs.
         self._hydrate_known_company_sizes(collected_companies)
-        if self.auto_expand_ats:
+        if self.auto_expand_ats and time.monotonic() < discovery_deadline:
             ats_result, board_count = self._expand_discovered_ats_boards(
-                collected_companies, collected_jobs
+                collected_companies, collected_jobs, discovery_deadline
             )
             if board_count:
                 collected_companies.extend(ats_result.companies)
@@ -464,6 +489,7 @@ class DiscoveryPipeline:
         self,
         companies: List[Company],
         jobs: List[Job],
+        deadline: float | None = None,
     ) -> Tuple[DiscoveryResult, int]:
         """Expand ATS job links into complete public boards for confirmed small startups."""
         company_by_website = {
@@ -512,13 +538,14 @@ class DiscoveryPipeline:
 
         logger.info("Auto-expanding %d public ATS boards from small-startup listings.", len(targets))
         client=self.ats_http_client or HttpClient(public_only=True,timeout=10,max_retries=1)
-        client.deadline=time.monotonic()+300
+        client.deadline=min(deadline or float("inf"), time.monotonic()+300)
         adapter = DirectAtsDiscoverySource(
             name="auto_discovered_ats",
             targets=targets[:40],
             http_client=client,
             platforms=self.ats_platforms,
         )
+        adapter.board_health = self.board_health
         result = adapter.discover()
         self.successful_polls.extend(adapter.successful_polls)
         return result, len(adapter.targets)
@@ -532,7 +559,7 @@ class DiscoveryPipeline:
     ) -> None:
         """Persist companies and linked jobs into the database with duplicate checks."""
         company_repo = CompanyRepository(session)
-        job_repo = JobRepository(session)
+        job_repo = JobRepository(session, self.settings.career_ops("simhash_repost_detection"))
 
         # Lookup caches: normalized_website -> company_id, normalized_name -> company_id
         company_id_by_website: Dict[str, int] = {}
@@ -602,14 +629,22 @@ class DiscoveryPipeline:
             remember_boards(company, [company.careers_url or ""])
         if any(source.name == "freehire" and source.enabled for source in self.settings.sources):
             verify_freehire_jobs(session)
-        logger.info("Freshness sweep closed %d unhandled jobs.", sweep_stale(session, self.successful_polls))
+        liveness = self.settings.career_ops("api_liveness_check")
+        expired = sweep_stale(session, self.successful_polls,
+                              lever_absence_authoritative=not liveness or liveness.get("lever_404_authoritative", False))
+        logger.info("Freshness sweep closed %d unhandled jobs.", expired)
+        if self.board_health:
+            self.board_health.save(session)
+            summary.ats_boards_paused = len(self.board_health.paused)
 
 
 def run_discovery_pipeline(
     settings: Optional[Settings] = None,
     session: Optional[Session] = None,
+    *,
+    deadline: float | None = None,
 ) -> DiscoverySummary:
     """Convenience helper to execute the discovery pipeline."""
     pipeline = DiscoveryPipeline(settings=settings, session=session)
-    return pipeline.run()
+    return pipeline.run(deadline=deadline)
 

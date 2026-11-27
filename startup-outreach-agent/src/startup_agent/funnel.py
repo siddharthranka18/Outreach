@@ -10,9 +10,12 @@ from startup_agent.matching.startup_filter import StartupEligibilityStatus
 from startup_agent.routing import build_outreach_routes
 
 
+CAREER_OPS_COUNTS = ("title_misses_kept_by_content", "ghost_jobs_filtered", "expired_by_liveness")
+
+
 def funnel_source(name):
     platform = name.split(":", 1)[0]
-    if platform in {"workable", "breezy", "teamtailor", "bamboohr", "personio", "freshteam"}:
+    if platform in {"workable", "breezy", "teamtailor", "bamboohr", "personio", "freshteam", "workday"}:
         return "ats_" + platform
     if platform in {"greenhouse", "ashby", "lever", "recruitee"}:
         return "company_career_sites"
@@ -26,6 +29,8 @@ def source_funnel(session, settings, *, routes=None):
         routes = build_outreach_routes(session, settings)
     routed = {r.job_id for r in routes if r.job_id}
     counts, reasons = {}, Counter()
+    liveness = bool(settings.career_ops("api_liveness_check"))
+    reposts = bool(settings.career_ops("simhash_repost_detection"))
     for job, company in session.execute(select(JobModel, CompanyModel).join(CompanyModel)):
         row = counts.setdefault(funnel_source(job.source_name), dict(normalized=0, size_known=0, size_eligible=0,
                                                      role_eligible=0, routed=0))
@@ -36,12 +41,21 @@ def source_funnel(session, settings, *, routes=None):
         match = matches.get(job.id)
         row["role_eligible"] += bool(match and match.eligibility_status == EligibilityStatus.ELIGIBLE)
         row["routed"] += job.id in routed
+        rescued = bool(match and match.rescued_by_content and job.id in routed)
+        ghost = reposts and job.status == "open" and bool(job.is_ghost_job)
+        expired = liveness and job.status == "open" and job.liveness_status == "expired"
+        for key, applies in zip(CAREER_OPS_COUNTS, (rescued, ghost, expired)):
+            row[key] = row.get(key, 0) + int(applies)
         if size != StartupEligibilityStatus.ELIGIBLE:
             reasons[size.value] += 1
             row.setdefault("rejections", Counter())[size.value] += 1
         elif job.id not in routed:
             reason = "Handled, unroutable or insufficient eligibility"
-            if match and match.eligibility_status != EligibilityStatus.ELIGIBLE:
+            if expired:
+                reason = "Expired by ATS liveness"
+            elif ghost:
+                reason = "Filtered repeated relists"
+            elif match and match.eligibility_status != EligibilityStatus.ELIGIBLE:
                 decision = ranker.scorer.eligibility_filter.evaluate(
                     title=job.job_title, category=match.category, opportunity_type=match.opportunity_type,
                     description=job.description, location=job.location,
@@ -65,11 +79,14 @@ def source_funnel(session, settings, *, routes=None):
             reasons.update(raw_reasons)
     result={"sources": counts, "rejections": dict(reasons.most_common(3))}
     # Keep the machine-readable last-fetch record useful to operations too.
-    if path.is_file():
+    if path.is_file() or settings.career_ops_upgrades.get("enabled"):
+        path.parent.mkdir(parents=True, exist_ok=True)
         for name,row in counts.items():
             record=fetched.get(name,{})
             if not isinstance(record,dict):record={"fetched":record}
             record.update({key:row[key] for key in ('normalized','size_known','size_eligible','role_eligible','routed')})
+            if settings.career_ops_upgrades.get("enabled"):
+                record.update({key: row.get(key, 0) for key in CAREER_OPS_COUNTS})
             fetched[name]=record
         path.write_text(json.dumps(fetched,indent=2),encoding='utf-8')
     return result
@@ -86,6 +103,10 @@ def format_funnel(funnel):
         if row.get("rejections"):
             lines.append("  " + "; ".join(f"{k}: {v}" for k, v in Counter(row["rejections"]).most_common(3)))
     lines.extend(f"{reason}: {count}" for reason, count in funnel["rejections"].items())
+    for key in CAREER_OPS_COUNTS:
+        count = sum(row.get(key, 0) for row in funnel["sources"].values())
+        if count:
+            lines.append(f"{key}: {count}")
     return "\n".join(lines)
 
 

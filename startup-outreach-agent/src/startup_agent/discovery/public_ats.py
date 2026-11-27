@@ -4,10 +4,90 @@ import re
 import html
 from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
+import httpx
 from startup_agent.models.job import Job
 from startup_agent.utils.normalizers import normalize_job_url
 
-PLATFORMS = {"workable", "breezy", "teamtailor", "bamboohr", "personio", "freshteam"}
+PLATFORMS = {"workable", "breezy", "teamtailor", "bamboohr", "personio", "freshteam", "workday"}
+WORKDAY_HOST = re.compile(r"(?P<tenant>[a-z0-9-]+)\.wd\d{1,2}\.myworkdayjobs\.com")
+WORKDAY_SITE = re.compile(r"[A-Za-z0-9_-]{1,100}")
+WORKDAY_PATH = re.compile(r"/job/(?:[A-Za-z0-9._~%()-]+/)*[A-Za-z0-9._~%()-]+")
+
+
+def workday_target(url):
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or not WORKDAY_HOST.fullmatch(parsed.netloc):
+        return None
+    parts = parsed.path.strip("/").split("/")
+    if parts[:3] == ["wday", "cxs", parsed.netloc.split(".")[0]]:
+        parts = parts[3:]
+    if parts and re.fullmatch(r"[a-z]{2}-[A-Z]{2}", parts[0]):
+        parts = parts[1:]
+    if not parts or parts[0] == "job" or not WORKDAY_SITE.fullmatch(parts[0]):
+        return None
+    return f"{parsed.netloc}/{parts[0]}"
+
+
+def workday_endpoints(board):
+    host, _, site = board.partition("/")
+    match = WORKDAY_HOST.fullmatch(host)
+    if not match or not WORKDAY_SITE.fullmatch(site):
+        raise ValueError("Expected a Workday career-site host and site identifier.")
+    return f"https://{host}/{site}", f"https://{host}/wday/cxs/{match['tenant']}/{site}"
+
+
+def workday_job_path(url):
+    path = urlsplit(url).path
+    _, marker, tail = path.partition("/job/")
+    external = marker + tail
+    if WORKDAY_PATH.fullmatch(external) and not any(
+        part in {".", ".."} or re.search(r"%(?:2f|5c|2e|25)", part, re.I) for part in external.split("/")
+    ):
+        return external
+    return None
+
+
+def fetch_workday_rows(board, client):
+    page_root, api_root = workday_endpoints(board)
+    postings = []
+    for offset in range(0, 60, 20):
+        data = client.post(f"{api_root}/jobs", json_data={
+            "appliedFacets": {}, "limit": 20, "offset": offset, "searchText": "",
+        }).json()
+        page = data["jobPostings"]
+        if not isinstance(page, list) or not isinstance(data.get("total"), int):
+            raise ValueError("Workday jobs shape changed.")
+        postings.extend(page)
+        if len(page) < 20 or len(postings) >= data["total"]:
+            break
+
+    def priority(row):
+        title = row.get("title") or ""
+        if re.search(r"\b(?:intern(?:ship)?|graduate|apprentice|junior|student|fresher|entry.level|co.op)\b", title, re.I):
+            return 0
+        return 1 if re.search(r"\b(?:engineer|developer|software|builder|programmer)\b", title, re.I) else 2
+
+    rows = []
+    details_checked = 0
+    for posting in sorted(postings, key=priority):
+        path = workday_job_path(posting.get("externalPath") or "")
+        if not path or posting.get("externalPath") != path:
+            continue
+        description = None
+        location = posting.get("locationsText")
+        if details_checked < 8 and priority(posting) < 2:
+            details_checked += 1
+            try:
+                detail = client.get(f"{api_root}{path}", allowed_domain=urlsplit(api_root).hostname).json()["jobPostingInfo"]
+                description = detail.get("jobDescription")
+                places = [detail.get("location") or location, *(detail.get("additionalLocations") or [])]
+                location = " / ".join(dict.fromkeys(place for place in places if isinstance(place, str) and place))
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in {404, 410}:
+                    raise
+                continue
+        rows.append((posting.get("title"), page_root + path, location, description, None, path))
+    return rows
 
 
 def text(value):
@@ -16,10 +96,12 @@ def text(value):
 
 def fetch_public_ats(target, client):
     platform, board = target["platform"], target["board_token"]
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", board):
+    if platform != "workday" and not re.fullmatch(r"[A-Za-z0-9_-]+", board):
         raise ValueError("Unsafe board token")
     rows = []
-    if platform == "workable":
+    if platform == "workday":
+        rows = fetch_workday_rows(board, client)
+    elif platform == "workable":
         data = client.get(f"https://apply.workable.com/api/v1/widget/accounts/{board}?details=true").json()
         for row in data["jobs"]:
             places = row.get("locations") or [row]

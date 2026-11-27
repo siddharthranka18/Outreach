@@ -44,6 +44,7 @@ class OutreachRoute:
     asks_for_internship: bool = False
     source_label: str = ""
     review_note: str = ""
+    trust_warning: str = ""
 
 
 def _public_link(value: str | None) -> str | None:
@@ -78,7 +79,8 @@ def junior_pitch_context(job, company, profile):
             "Do not claim to have graduated or to meet full-time availability.")
 
 
-def build_outreach_routes(session: Session, settings: Settings, *, internship_review: bool = False) -> list[OutreachRoute]:
+def build_outreach_routes(session: Session, settings: Settings, *, internship_review: bool = False,
+                          check_liveness: bool = False) -> list[OutreachRoute]:
     from startup_agent.discovery.portfolio import india_location
 
     profile_path = settings.config_dir / "candidate_profile.yaml"
@@ -102,11 +104,28 @@ def build_outreach_routes(session: Session, settings: Settings, *, internship_re
     }
     handled_keys = {job.canonical_job_key for job in jobs.values()
                     if job.canonical_job_key and job.status in {"skipped", "applied"}}
-    for match in ranker.rank_opportunities(limit=len(jobs)):
+    matches = ranker.rank_opportunities(limit=len(jobs))
+    liveness = settings.career_ops("api_liveness_check")
+    reposts = settings.career_ops("simhash_repost_detection")
+    trust = settings.career_ops("trust_score")
+    if check_liveness and liveness:
+        from startup_agent.discovery.liveness import refresh_liveness
+
+        refresh_liveness(
+            [jobs[match.job_id] for match in matches
+             if match.eligibility_status == EligibilityStatus.ELIGIBLE
+             and jobs[match.job_id].canonical_job_key not in handled_keys
+             and jobs[match.job_id].normalized_job_url not in seen_urls],
+            liveness,
+        )
+    for match in matches:
         job = jobs.get(match.job_id)
         if not job or job.status != "open":
             continue
         if job.canonical_job_key in handled_keys:
+            continue
+        if ((liveness and job.liveness_status == "expired") or (reposts and job.is_ghost_job)
+                or (trust and job.trust_score is not None and job.trust_score < 30)):
             continue
         review_note = ""
         if normal_size.evaluate(job.company.employee_count).status != StartupEligibilityStatus.ELIGIBLE:
@@ -167,6 +186,7 @@ def build_outreach_routes(session: Session, settings: Settings, *, internship_re
             matching_skills=tuple(match.matching_skills),
             category=match.category,
             review_note=review_note,
+            trust_warning=match.trust_warning,
             source_label={"remotive": "Remotive", "himalayas": "Himalayas", "remoteok": "Remote OK",
                           "jobicy": "Jobicy", "freehire": "Freehire", "working_nomads": "Working Nomads", "hn_hiring": "Hacker News Who is hiring",
                           "vc_peakxv": "Peak XV portfolio", "vc_lightspeed": "Lightspeed portfolio",

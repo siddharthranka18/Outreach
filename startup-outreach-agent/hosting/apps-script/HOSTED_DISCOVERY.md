@@ -30,3 +30,11 @@ The VM sends the third card stream only when the deployed web app advertises sup
 Existing enquiries use MailApp and the Drive PDF path. New cards display their mode and **No PDF**. The daily checker queues follow-up approvals for new tracked threads only, and approval repeats the recipient and reply checks before sending. Follow-up buttons never send unless explicitly approved in the configured private Telegram chat. If delivery is uncertain, check Gmail Sent before taking further action.
 
 Set `outreach_upgrades.enabled` to `false` in the VM config to stop drafting upgrades and syncing an enabled follow-up policy. Run `disableOutreachUpgrades` in Apps Script to pause existing upgrade approvals and follow-ups immediately.
+
+## Career Ops
+
+Run the Alembic migration before starting a digest with this version. The VM reads the feature flags in `config/sources.yaml`. It checks shortlisted public ATS postings during live delivery. The stored-data preview shows saved liveness and matching decisions without making those checks again. The VM records rescue, relist and expiry counts in `data/processed/source_counts.json`.
+
+Import a reviewed employer registry from the agent directory with `PYTHONPATH=src .venv/bin/python -m startup_agent.discovery.career_ops_importer --source <file-directory-or-https-url>`. Only boards with verified headcount of up to 200 employees enter discovery. The importer stores boards with unresolved sizes for later enrichment. Boards paused after repeated failures can be reviewed by checking `ats_boards` in SQLite. Quiet boards are polled weekly.
+
+Add your own redacted writing samples to `config/writing_samples.md` to enable voice calibration. Gemini draft fact checks run independently of sample availability.

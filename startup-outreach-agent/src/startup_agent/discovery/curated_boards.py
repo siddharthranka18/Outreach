@@ -94,11 +94,13 @@ class CuratedStartupDiscoverySource(DirectAtsDiscoverySource):
             now = time.time()
             if max(state.get(provider, 0), state.get(key, 0)) > now:
                 continue
+            if self.board_health and not self.board_health.allows(target):
+                continue
             state[key] = now + POLL_INTERVAL
             save_state()
             self.attempted_boards += 1
             try:
-                snapshot = self.fetch_board_jobs(target)
+                snapshot = self.poll_board(target)
             except httpx.HTTPStatusError as error:
                 if error.response.status_code in {401, 403, 429}:
                     state[provider] = now + max(POLL_INTERVAL,

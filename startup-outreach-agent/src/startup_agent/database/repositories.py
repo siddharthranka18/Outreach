@@ -1,12 +1,13 @@
 """Repository layer for Company and Job persistence operations."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple, Union
 from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from startup_agent.database.models import CompanyModel, JobModel
+from startup_agent.database.models import CompanyModel, JobModel, JobRelistModel
 from startup_agent.utils.job_key import canonical_job_key
+from startup_agent.utils.simhash import description_simhash, hamming_distance
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 from startup_agent.utils.normalizers import (
@@ -38,7 +39,7 @@ def _is_indirect_company_url(value: Optional[str]) -> bool:
     parsed = urlparse(value if "://" in value else f"https://{value}")
     host = parsed.netloc.lower().removeprefix("www.")
     return host in INDIRECT_COMPANY_HOSTS or any(host.endswith('.'+suffix) for suffix in
-        ('recruitee.com','breezy.hr','teamtailor.com','bamboohr.com','freshteam.com','jobs.personio.de'))
+        ('recruitee.com','breezy.hr','teamtailor.com','bamboohr.com','freshteam.com','jobs.personio.de','myworkdayjobs.com'))
 
 
 class CompanyRepository:
@@ -170,8 +171,42 @@ class CompanyRepository:
 class JobRepository:
     """Handles database persistence and deduplication for advertised jobs."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, repost_options: dict | None = None) -> None:
         self.session = session
+        self.repost_options = repost_options or {}
+
+    def _similar_job(self, company_id, fingerprint, job, cutoff):
+        recent = self.session.scalars(select(JobModel).where(
+            JobModel.company_id == company_id, JobModel.last_seen_at >= cutoff,
+        ).order_by(JobModel.first_seen_at, JobModel.id))
+        threshold = int(self.repost_options.get("hamming_distance_threshold", 3))
+        for candidate in recent:
+            if candidate.location and job.location and normalize_name(candidate.location) != normalize_name(job.location):
+                continue
+            if not candidate.description_simhash:
+                candidate.description_simhash = description_simhash(candidate.description)
+            if candidate.description_simhash and hamming_distance(fingerprint, candidate.description_simhash) <= threshold:
+                return candidate
+        return None
+
+    def _record_relist(self, existing, identity, now, cutoff):
+        if not identity or (identity == existing.normalized_job_url and not existing.repost_count):
+            return
+        sightings = list(self.session.scalars(select(JobRelistModel).where(JobRelistModel.job_id == existing.id)))
+        if identity != existing.normalized_job_url and not any(item.identity == identity for item in sightings):
+            # Store the original identity so a later canonical URL update cannot count it as a relist.
+            if not any(item.identity == existing.normalized_job_url for item in sightings):
+                original = JobRelistModel(job_id=existing.id, identity=existing.normalized_job_url,
+                                          observed_at=existing.first_seen_at)
+                self.session.add(original)
+                sightings.append(original)
+            relist = JobRelistModel(job_id=existing.id, identity=identity, observed_at=now)
+            self.session.add(relist)
+            sightings.append(relist)
+        days = {item.observed_at.date() for item in sightings if item.observed_at.date() >= cutoff.date()}
+        days.discard(existing.first_seen_at.date())
+        existing.repost_count = len(days)
+        existing.is_ghost_job = len(days) >= int(self.repost_options.get("ghost_job_min_relists", 2))
 
     def _to_model(self, job: Union[Job, JobModel]) -> JobModel:
         """Convert domain Job to JobModel if needed."""
@@ -299,8 +334,33 @@ class JobRepository:
                     break
 
         now = datetime.now(timezone.utc)
+        fingerprint = description_simhash(job.description) if self.repost_options else None
+        similar = False
+        if fingerprint:
+            cutoff = now - timedelta(days=int(self.repost_options.get("ghost_job_window_days", 90)))
+            if existing is None:
+                existing = self._similar_job(company_id, fingerprint, job, cutoff)
+            if existing is not None:
+                stored_hash = existing.description_simhash or description_simhash(existing.description)
+                similar = bool(stored_hash and hamming_distance(fingerprint, stored_hash) <= int(
+                    self.repost_options.get("hamming_distance_threshold", 3)
+                ))
+                if similar:
+                    self._record_relist(existing, norm_url, now, cutoff)
 
         if existing:
+            if fingerprint and (not existing.description_simhash or existing.normalized_job_url == norm_url):
+                existing.description_simhash = fingerprint
+            if (similar and ":" in source_name and existing.source_name == source_name
+                    and existing.normalized_job_url != norm_url and existing.status not in {"skipped", "applied"}
+                    and (existing.status == "closed" or existing.liveness_status == "expired")):
+                existing.job_url = job.job_url
+                existing.normalized_job_url = norm_url
+                existing.source_job_id = source_job_id
+                existing.description_simhash = fingerprint
+                existing.liveness_status = "unverified"
+                existing.last_liveness_check_at = None
+                existing.missing_ats_polls = 0
             fields_to_check = [
                 "job_title",
                 "description",
@@ -333,6 +393,8 @@ class JobRepository:
             return existing, False
 
         new_model = self._to_model(job)
+        if fingerprint:
+            new_model.description_simhash = fingerprint
         new_model.canonical_job_key = key
         if source_name == "freehire":
             new_model.last_verified_open_at = now

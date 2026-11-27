@@ -1,6 +1,7 @@
 """Opportunity ranking engine for evaluating stored database jobs."""
 
 import logging
+import json
 from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from startup_agent.database.models import CompanyModel, JobModel
 from startup_agent.database.session import create_session_factory, session_scope
 from startup_agent.matching.profile import CandidateProfile
 from startup_agent.matching.scorer import MatchResult, OpportunityScorer
+from startup_agent.matching.trust_score import evaluate_trust
 from startup_agent.matching.startup_filter import (
     StartupEligibilityFilter,
     StartupEligibilityStatus,
@@ -66,8 +68,12 @@ class OpportunityRanker:
         )
         rows = session.execute(stmt).all()
 
-        results: List[MatchResult] = []
+        results: list[tuple[float, MatchResult]] = []
         company_eligibility_cache = {}
+        rescue_options = self.settings.career_ops("title_miss_rescue")
+        trust_options = self.settings.career_ops("trust_score")
+        trust_threshold = int(trust_options.get("demote_below_score", 60))
+        verified_small = StartupEligibilityFilter(200, allow_unknown=False)
         for job_model, company_model in rows:
             startup_eligibility = company_eligibility_cache.get(company_model.id)
             if startup_eligibility is None:
@@ -95,12 +101,26 @@ class OpportunityRanker:
                 hiring_status=company_model.hiring_status,
                 company_website=company_model.website,
                 careers_url=company_model.careers_url,
+                rescue_min_indicators=(
+                    int(rescue_options.get("min_tech_indicators", 2))
+                    if rescue_options and verified_small.evaluate(company_model.employee_count).status
+                    == StartupEligibilityStatus.ELIGIBLE else None
+                ),
             )
+            if rescue_options:
+                job_model.rescued_by_content = match_res.rescued_by_content
+            ranking_score = match_res.match_score
+            if trust_options:
+                score, flags = evaluate_trust(job_model, company_model)
+                job_model.trust_score, job_model.trust_flags_json = score, json.dumps(flags)
+                if score < trust_threshold:
+                    ranking_score -= max(10, trust_threshold - score)
+                    match_res.trust_warning = f"[Low Trust: {score}]"
 
             if match_res.match_score >= min_score:
-                results.append(match_res)
+                results.append((ranking_score, match_res))
 
         # Sort descending by match_score
-        results.sort(key=lambda r: r.match_score, reverse=True)
-        return results[:limit]
+        results.sort(key=lambda item: item[0], reverse=True)
+        return [match for _, match in results[:limit]]
 

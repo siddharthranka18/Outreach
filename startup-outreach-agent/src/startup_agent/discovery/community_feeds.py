@@ -1,11 +1,10 @@
 """Public internship JSON and programming RSS with conservative location checks."""
-import re
 from datetime import datetime,timezone
-from bs4 import BeautifulSoup
 from startup_agent.discovery.base import BaseDiscoverySource,DiscoveryResult
 from startup_agent.discovery.andhra_startup_map import _is_target_role
 from startup_agent.discovery.structured_jobs import parse_posting
 from startup_agent.discovery.portfolio import india_location
+from startup_agent.discovery.remote_feeds import wwr_programming_entries
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 from startup_agent.utils.http_client import HttpClient
@@ -40,21 +39,13 @@ class CommunityFeedSource(BaseDiscoverySource):
                     description=row.get('description'),posted_at=datetime.fromtimestamp(row['date_posted'],timezone.utc) if row.get('date_posted') else None)
                 companies[website]=company;jobs[job.job_url]=job
         else:
-            feed=BeautifulSoup(response.text,'xml')
-            if not feed.find('rss'): raise ValueError('Expected WWR RSS')
-            for item in feed.find_all('item'):
+            for company, role, url, description, location in wwr_programming_entries(response.text):
                 self.fetched_count+=1
-                title=item.find('title').get_text(' ',strip=True)
-                company,_,role=title.partition(':')
-                description=item.find('description').get_text() if item.find('description') else ''
-                region=item.find('region')
-                location=region.get_text(' ',strip=True) if region else ''
-                if not re.search(r'\b(?:India|Worldwide|Anywhere)\b',location,re.I):
-                    # WWR exposes eligibility in its description on older RSS variants.
-                    location='Worldwide' if re.search(r'Anywhere in the World',description,re.I) else location
+                if not location:
+                    continue
                 known=self.employers.get(normalize_name(company.strip()))
                 if not known: continue
-                row={'title':role.strip(),'description':description,'url':item.find('link').get_text(),
+                row={'title':role,'description':description,'url':url,
                      'hiringOrganization':{'name':company.strip(),'url':'https://'+known[0]},
                      'applicantLocationRequirements':{'name':location}}
                 parsed=parse_posting(row,self.name,self.url,self.employers)

@@ -33,6 +33,11 @@ class Settings:
     )
     sources: List[SourceConfig] = field(default_factory=list)
     outreach_upgrades: dict = field(default_factory=dict)
+    career_ops_upgrades: dict = field(default_factory=dict)
+
+    def career_ops(self, feature: str) -> dict:
+        options = self.career_ops_upgrades.get(feature) or {}
+        return options if self.career_ops_upgrades.get("enabled") and options.get("enabled") else {}
 
     @property
     def config_dir(self) -> Path:
@@ -89,10 +94,12 @@ class Settings:
 
         sources: List[SourceConfig] = []
         upgrades = {}
+        career_ops = {}
         if sources_file.exists():
             with open(sources_file, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
                 upgrades = data.get("outreach_upgrades") or {}
+                career_ops = data.get("career_ops_upgrades") or {}
                 raw_sources = data.get("sources", [])
                 for item in raw_sources:
                     sources.append(
@@ -114,5 +121,6 @@ class Settings:
             base_dir=base_dir,
             sources=sources,
             outreach_upgrades=upgrades,
+            career_ops_upgrades=career_ops,
         )
 

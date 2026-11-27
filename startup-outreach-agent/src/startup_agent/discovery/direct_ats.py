@@ -11,7 +11,7 @@ from startup_agent.discovery.base import BaseDiscoverySource, DiscoveryResult
 from startup_agent.models.company import Company
 from startup_agent.models.job import Job
 from startup_agent.utils.http_client import HttpClient
-from startup_agent.discovery.public_ats import PLATFORMS, fetch_public_ats
+from startup_agent.discovery.public_ats import PLATFORMS, fetch_public_ats, workday_target
 
 logger = logging.getLogger("startup_agent.discovery.ats")
 
@@ -31,9 +31,12 @@ def extract_ats_target(
     platform: Optional[str] = None
     board_token: Optional[str] = None
 
-    if host in {"jobs.ashbyhq.com", "api.ashbyhq.com"} and path_parts:
+    workday = workday_target(job_url)
+    if workday:
+        platform, board_token = "workday", workday
+    elif host in {"jobs.ashbyhq.com", "api.ashbyhq.com"} and path_parts:
         platform = "ashby"
-        board_token = path_parts[0]
+        board_token = path_parts[-1] if path_parts[:2] == ["posting-api", "job-board"] else path_parts[0]
     elif host in {
         "boards.greenhouse.io",
         "job-boards.greenhouse.io",
@@ -46,9 +49,9 @@ def extract_ats_target(
                 board_token = path_parts[board_index + 1]
         else:
             board_token = path_parts[0]
-    elif host in {"jobs.lever.co", "api.lever.co"} and path_parts:
+    elif host in {"jobs.lever.co", "api.lever.co", "jobs.eu.lever.co", "api.eu.lever.co"} and path_parts:
         platform = "lever"
-        if host == "api.lever.co" and "postings" in path_parts:
+        if host.startswith("api.") and "postings" in path_parts:
             postings_index = path_parts.index("postings")
             if postings_index + 1 < len(path_parts):
                 board_token = path_parts[postings_index + 1]
@@ -77,6 +80,8 @@ def extract_ats_target(
     }
     if employee_count:
         target["employee_count"] = employee_count
+    if platform == "lever" and ".eu." in host:
+        target["source_url"] = job_url
     return target
 
 
@@ -97,6 +102,7 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
         self.platforms = set(platforms) if platforms is not None else {"greenhouse", "ashby", "lever", "recruitee", "workable", "breezy", "teamtailor", "bamboohr", "freshteam"}
         self.successful_polls = []
         self.attempted_boards = 0
+        self.board_health = None
 
     def _discover_greenhouse(self, target: Dict[str, str]) -> List[Job]:
         """Fetch jobs from public Greenhouse boards API."""
@@ -196,7 +202,9 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
         board = target["board_token"]
         company_name = target["company_name"]
         website = target["website"]
-        url = f"https://api.lever.co/v0/postings/{board}?mode=json"
+        host = urlparse(target.get("source_url") or "").hostname
+        api = "api.eu.lever.co" if host in {"jobs.eu.lever.co", "api.eu.lever.co"} else "api.lever.co"
+        url = f"https://{api}/v0/postings/{board}?mode=json"
 
         resp = self.http_client.get(url)
         data = resp.json()
@@ -269,7 +277,7 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
         platform = target["platform"].lower()
         if platform not in self.platforms:
             return []
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", target["board_token"]):
+        if platform != "workday" and not re.fullmatch(r"[A-Za-z0-9_-]+", target["board_token"]):
             raise ValueError("Unsafe ATS board token")
         if platform in PLATFORMS:
             return fetch_public_ats(target, self.http_client)
@@ -280,6 +288,19 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
             "recruitee": self._discover_recruitee,
         }
         return fetch[target["platform"].lower()](target)
+
+    def poll_board(self, target):
+        if self.board_health and not self.board_health.allows(target):
+            return None
+        try:
+            jobs = self.fetch_board_jobs(target)
+        except Exception as exc:
+            if self.board_health:
+                self.board_health.outcome(target, error=exc)
+            raise
+        if self.board_health:
+            self.board_health.outcome(target, jobs=jobs)
+        return jobs
 
     def discover(self) -> DiscoveryResult:
         """Run discovery across all configured ATS board endpoints."""
@@ -322,7 +343,9 @@ class DirectAtsDiscoverySource(BaseDiscoverySource):
                 seen_companies.add(website)
 
             try:
-                target_jobs = self.fetch_board_jobs(target)
+                target_jobs = self.poll_board(target)
+                if target_jobs is None:
+                    continue
                 jobs.extend(target_jobs)
                 # Only protocols returning a complete, unpaginated snapshot may count absence.
                 if platform in {"greenhouse", "ashby", "lever", "recruitee", "workable", "personio"}:

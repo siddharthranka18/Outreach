@@ -1,4 +1,29 @@
 version: "1.0"
+career_ops_upgrades:
+  enabled: true
+  api_liveness_check:
+    enabled: true
+    lever_404_authoritative: false
+    max_checks_per_run: 50
+  simhash_repost_detection:
+    enabled: true
+    hamming_distance_threshold: 3
+    ghost_job_window_days: 90
+    ghost_job_min_relists: 2
+  title_miss_rescue:
+    enabled: true
+    min_tech_indicators: 2
+  dead_board_health:
+    enabled: true
+    failure_threshold: 3
+    prune_quiet_days: 30
+  trust_score:
+    enabled: true
+    demote_below_score: 60
+  voice_and_fact_gate:
+    enabled: true
+    writing_samples_path: config/writing_samples.md
+
 outreach_upgrades:
   enabled: true
   max_drafts_per_run: 5
@@ -24,6 +49,7 @@ outreach_upgrades:
     trigger_after_days_no_reply: 12
 
 sources:
+  - {name: ats_workday, display_name: Workday, type: ats_platform, enabled: true, description: Bounded Workday CXS career site reads from verified small-employer boards.}
   - name: curated_startup_boards
     display_name: Reviewed startup portfolio boards
     type: public_jobs_api

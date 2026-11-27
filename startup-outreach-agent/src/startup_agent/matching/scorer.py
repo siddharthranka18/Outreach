@@ -69,6 +69,8 @@ class MatchResult:
     job_url: str = ""
     company_website: Optional[str] = None
     careers_url: Optional[str] = None
+    trust_warning: str = ""
+    rescued_by_content: bool = False
 
 
 class OpportunityScorer:
@@ -106,6 +108,7 @@ class OpportunityScorer:
         hiring_status: Optional[str] = None,
         company_website: Optional[str] = None,
         careers_url: Optional[str] = None,
+        rescue_min_indicators: int | None = None,
     ) -> MatchResult:
         """Calculate the explainable technical match score for an opportunity."""
         raw_desc = (description or "").strip()
@@ -121,6 +124,22 @@ class OpportunityScorer:
             description=description,
         )
         category = self.classifier.classify(job_title, description, employment_type)
+        rescued = None
+        if rescue_min_indicators is not None:
+            profile_skills = {
+                skill.strip().casefold()
+                for skill in self.profile.all_skills
+            }
+            recognised = {
+                name for name, aliases in SKILL_TAXONOMY.items()
+                if name in profile_skills or profile_skills.intersection(aliases)
+            }
+            detected = self._extract_job_skills(raw_desc) & recognised
+            rescued = self.classifier.rescue_by_content(
+                job_title, description, experience_level, employment_type, detected, rescue_min_indicators,
+            )
+            if rescued:
+                opportunity_type, category = rescued
 
         # 2. Evaluate Eligibility Separately
         eligibility = self.eligibility_filter.evaluate(
@@ -339,4 +358,5 @@ class OpportunityScorer:
             job_url=job_url,
             company_website=company_website,
             careers_url=careers_url,
+            rescued_by_content=bool(rescued),
         )
